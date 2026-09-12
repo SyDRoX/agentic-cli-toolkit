@@ -56,6 +56,6 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "Setup complete. Launch with:" -ForegroundColor Green
-Write-Host "  pwsh -ExecutionPolicy Bypass -File `"$ScriptDir\DevLayout.ps1`"" -ForegroundColor Cyan
+Write-Host "  cmd /c `"$ScriptDir\LayoutUI.bat`"" -ForegroundColor Cyan
 Write-Host "Optional hotkey (Ctrl+Alt+D):" -ForegroundColor Green
 Write-Host "  pwsh -ExecutionPolicy Bypass -File `"$ScriptDir\Setup-DevLayoutShortcut.ps1`"" -ForegroundColor Cyan
