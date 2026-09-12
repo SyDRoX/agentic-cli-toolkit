@@ -1,0 +1,6 @@
+# Python runtime files
+__pycache__/
+*.py[cod]
+
+# Windows shortcut files
+*.lnk

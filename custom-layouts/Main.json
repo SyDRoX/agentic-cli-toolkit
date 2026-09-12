@@ -1,0 +1,49 @@
+{
+  "name": "Main",
+  "windows": [
+    {
+      "name": "Ormi pi hy4, pi hy4, agent",
+      "windowNum": 102,
+      "targetMonitor": 0,
+      "tabs": [
+        {
+          "title": "ORMI-1",
+          "workingDir": "C:\\Repos\\ormi-unity",
+          "agent": "pi"
+        },
+        {
+          "title": "ORMI-2",
+          "workingDir": "C:\\repos2\\ormi-unity2",
+          "agent": "pi"
+        },
+        {
+          "title": "ORMI-3",
+          "workingDir": "C:\\repos3\\ormi-unity3",
+          "agent": "cursor"
+        }
+      ]
+    },
+    {
+      "name": "Potato pi hy4, pi hy4, agent",
+      "windowNum": 103,
+      "targetMonitor": 0,
+      "tabs": [
+        {
+          "title": "PS-1",
+          "workingDir": "C:\\Repos\\PotatoSandwich",
+          "agent": "pi"
+        },
+        {
+          "title": "PS-2",
+          "workingDir": "C:\\repos2\\PotatoSandwich2",
+          "agent": "pi"
+        },
+        {
+          "title": "PS-3",
+          "workingDir": "C:\\repos3\\PotatoSandwich3",
+          "agent": "cursor"
+        }
+      ]
+    }
+  ]
+}
