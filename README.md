@@ -3,6 +3,8 @@
 Windows tooling for orchestrating agentic CLIs across repositories, Windows
 Terminal sessions, layouts, and notifications.
 
+![agentic-cli-toolkit demo](https://github.com/user-attachments/assets/7873ef4d-c73b-42a6-9720-6af570691389)
+
 ## Layout composer
 
 Run `LayoutUI.bat` to open the Python/Tkinter layout composer. It creates and
