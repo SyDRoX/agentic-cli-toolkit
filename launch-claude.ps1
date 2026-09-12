@@ -1,4 +1,4 @@
-# Per-tab launcher for Claude Code - used by DevLayout.
+# Per-tab launcher for Claude Code - used by agentic-cli-toolkit.
 # Args: $args[0] = tab index (1-4), $args[1] = label, $args[2] = window number
 #
 # SESSION RESUME (the point of this script)

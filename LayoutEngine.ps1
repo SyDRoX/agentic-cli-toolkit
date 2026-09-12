@@ -5,7 +5,7 @@
     tab per configured repo, maximized on a target monitor.
 .DESCRIPTION
     Dot-source this file and call Invoke-LayoutWindow with a layout hashtable.
-    It is the generalized form of the logic in DevLayout.ps1, extracted so that
+    It is the generalized form of the toolkit's layout logic, extracted so that
     several layouts (one per game, or a combined one) can share it instead of
     copying the Win32 plumbing.
 
@@ -31,7 +31,7 @@
     reordering the list reassigns which conversation each tab reopens. Appending
     a tab is safe; reordering existing ones is not.
 .NOTES
-    Adapted from DevLayout.ps1 (itself adapted from SyDroX/dev-layout, MIT).
+    Adapted from SyDroX/dev-layout, MIT.
 #>
 
 # ============================================================================

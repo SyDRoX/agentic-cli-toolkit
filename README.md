@@ -38,7 +38,7 @@ powershell -ExecutionPolicy Bypass -File .\Setup-DevLayout.ps1
 
 ## agentic-cli-notify
 
-The former `claude-notify` project is bundled under `agentic-cli-notify/`. It
+The former `claude-notify` project is now bundled under `agentic-cli-notify/`. It
 provides taskbar flashing and clickable WPF notifications for Claude Code and
 Codex CLI sessions, isolated by `WT_SESSION`.
 
