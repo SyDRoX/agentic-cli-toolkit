@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-$testDir = Join-Path ([IO.Path]::GetTempPath()) ('claude-notify-ui-' + [guid]::NewGuid().ToString('N'))
+$testDir = Join-Path ([IO.Path]::GetTempPath()) ('agentic-cli-notify-ui-' + [guid]::NewGuid().ToString('N'))
 $savedSession = $env:WT_SESSION
 $forms = @()
 $popupIds = @()
@@ -95,7 +95,7 @@ try {
     $resolvedTest = [IO.Path]::GetFullPath($testDir)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     if ($resolvedTest.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
-        (Split-Path $resolvedTest -Leaf) -like 'claude-notify-ui-*') {
+        (Split-Path $resolvedTest -Leaf) -like 'agentic-cli-notify-ui-*') {
         Remove-Item -LiteralPath $resolvedTest -Recurse -Force
     }
 }

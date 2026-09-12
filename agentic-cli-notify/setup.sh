@@ -3,9 +3,9 @@
 # It captures the current WT window and selected tab for this session.
 #
 # Usage:
-#   bash ~/.claude/hooks/claude-notify/setup.sh                        # auto-detect
-#   bash ~/.claude/hooks/claude-notify/setup.sh 3                      # override tab index
-#   bash ~/.claude/hooks/claude-notify/setup.sh 3 "Repos / Claude 1"  # override tab index + label
+#   bash ~/.claude/hooks/agentic-cli-notify/setup.sh                        # auto-detect
+#   bash ~/.claude/hooks/agentic-cli-notify/setup.sh 3                      # override tab index
+#   bash ~/.claude/hooks/agentic-cli-notify/setup.sh 3 "Repos / Claude 1"  # override tab index + label
 
 TAB_OVERRIDE="$1"
 LABEL="$2"
@@ -16,7 +16,7 @@ if [ -z "$WT_SESSION" ]; then
     exit 1
 fi
 
-DIR="$USERPROFILE/.claude/hooks/claude-notify"
+DIR="$USERPROFILE/.claude/hooks/agentic-cli-notify"
 
 if [ -n "$HWND_OVERRIDE" ]; then
     # Use provided HWND (from DevLayout or other automated launcher)

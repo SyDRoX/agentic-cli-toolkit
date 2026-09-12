@@ -112,7 +112,7 @@ class SaveHwnd
         string suffix = Suffix(args);
         string dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude", "hooks", "claude-notify"
+            ".claude", "hooks", "agentic-cli-notify"
         );
 
         // Try process tree first (reliable for automated launches like DevLayout)

@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 param(
     [string]$CodexDir = $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }),
-    [string]$InstallDir = (Join-Path $env:USERPROFILE '.claude\hooks\claude-notify')
+    [string]$InstallDir = (Join-Path $env:USERPROFILE '.claude\hooks\agentic-cli-notify')
 )
 $ErrorActionPreference = 'Stop'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -18,4 +18,4 @@ if ($LASTEXITCODE -ne 0) { throw 'save-hwnd.exe compilation failed.' }
 Write-Host 'Installed. In Codex, use /hooks to review and trust the two notification hooks.'
 Write-Host 'If hooks are disabled, enable hooks = true under [features] in config.toml.'
 Write-Host 'From each focused Windows Terminal tab, run:'
-Write-Host '  bash ~/.claude/hooks/claude-notify/setup.sh'
+Write-Host '  bash ~/.claude/hooks/agentic-cli-notify/setup.sh'

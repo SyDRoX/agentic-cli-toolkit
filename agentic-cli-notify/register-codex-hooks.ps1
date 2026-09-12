@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 param(
     [string]$CodexDir = $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }),
-    [string]$NotifyDir = (Join-Path $env:USERPROFILE '.claude\hooks\claude-notify')
+    [string]$NotifyDir = (Join-Path $env:USERPROFILE '.claude\hooks\agentic-cli-notify')
 )
 $ErrorActionPreference = 'Stop'
 $settingsPath = Join-Path $CodexDir 'hooks.json'
@@ -42,7 +42,7 @@ if ($changed) {
     $null = $json | ConvertFrom-Json
     $null = New-Item -ItemType Directory -Path $CodexDir -Force
     if (Test-Path -LiteralPath $settingsPath) {
-        $backup = "$settingsPath.bak-claude-notify-$([guid]::NewGuid().ToString('N'))"
+        $backup = "$settingsPath.bak-agentic-cli-notify-$([guid]::NewGuid().ToString('N'))"
         Copy-Item -LiteralPath $settingsPath -Destination $backup
         Write-Host "Backup: $backup"
     }

@@ -131,11 +131,11 @@ Behavioural, by request:
 Bugs fixed along the way:
 
 - **State directory.** Upstream writes session state into
-  `~/.claude/hooks/claude-notify/`, a directory belonging to a separate project
-  that dev-layout does not ship. When it is absent, every `Set-Content` fails and
+  `~/.claude/hooks/agentic-cli-notify/`, a directory belonging to the notification
+  component. When it is absent, every `Set-Content` fails and
   **nothing ever resumes**. State now lives in `~/.claude/dev-layout/`, created
   by the setup script.
-- **claude-notify is now optional.** Upstream calls its `setup.sh`
+- **agentic-cli-notify is now optional.** Upstream calls its `setup.sh`
   unconditionally and polls 15s for an HWND file; both are skipped when the
   integration is not installed.
 - **Malformed slot UUIDs.** Upstream sets the UUID version nibble on `$hash[6]`
@@ -168,6 +168,7 @@ Bugs fixed along the way:
 | `Setup-DevLayoutShortcut.ps1` | Optional `Ctrl+Alt+D` hotkey |
 | `DevLayout.bat` | Wrapper for taskbar pinning |
 | `LayoutEngine.ps1` | Shared launcher engine used by the three layouts below |
+| `agentic-cli-notify/` | Bundled Claude/Codex terminal notification component |
 | `ClaudePotatoLayout.ps1` | PotatoSandwich x3 (window slot 2) |
 | `ClaudePotatoLayout.bat` | Wrapper for taskbar pinning |
 | `ClaudeOrmiLayout.ps1` | ormi-unity x3 (window slot 3) |

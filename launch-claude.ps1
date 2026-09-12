@@ -31,12 +31,12 @@ if (-not (Test-Path $StateDir)) {
 }
 
 # ---------------------------------------------------------------------------
-# Optional claude-notify integration
+# Optional agentic-cli-notify integration
 # ---------------------------------------------------------------------------
-# Upstream calls this unconditionally and assumes ~/.claude/hooks/claude-notify
+# Upstream calls this unconditionally and assumes ~/.claude/hooks/agentic-cli-notify
 # exists. It does not ship with dev-layout, so guard it: when absent, skip it
 # entirely instead of erroring and burning 15s polling for an HWND nobody reads.
-$notifySetup = Join-Path $env:USERPROFILE ".claude\hooks\claude-notify\setup.sh"
+$notifySetup = Join-Path $env:USERPROFILE ".claude\hooks\agentic-cli-notify\setup.sh"
 if (Test-Path $notifySetup) {
     $hwnd = $null
     $hwndFile = Join-Path $StateDir ".devlayout-hwnd-$windowNum"

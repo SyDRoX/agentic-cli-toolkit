@@ -1,4 +1,4 @@
-# claude-notify
+# agentic-cli-notify
 
 Desktop notification system for Claude Code on Windows Terminal.
 
@@ -25,7 +25,7 @@ Hooks (cmd.exe) -> notify.ps1 (PowerShell) -> popup.ps1 (WPF)
 
 ## State Files
 
-All runtime state is in `~/.claude/hooks/claude-notify/`, keyed by `WT_SESSION`:
+All runtime state is in `~/.claude/hooks/agentic-cli-notify/`, keyed by `WT_SESSION`:
 
 - `.hwnd-{session}` - Window handle
 - `.tabindex-{session}` - Tab position (1-based)

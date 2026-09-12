@@ -35,7 +35,7 @@ if (-not (Test-Path $HooksDir)) {
 Copy-Item $HookSource $HookDest -Force
 Write-Host "Session hook installed: $HookDest" -ForegroundColor Green
 
-# 2. State directory. Upstream wrote state into ~/.claude/hooks/claude-notify,
+# 2. State directory. Upstream wrote state into ~/.claude/hooks/agentic-cli-notify,
 #    a directory that ships with a different project - if it was missing, every
 #    session save failed silently and nothing ever resumed.
 if (-not (Test-Path $StateDir)) {

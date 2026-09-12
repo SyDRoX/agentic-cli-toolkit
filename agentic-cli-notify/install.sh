@@ -1,13 +1,13 @@
 #!/bin/bash
-# Install claude-notify into ~/.claude/hooks/claude-notify/
+# Install agentic-cli-notify into ~/.claude/hooks/agentic-cli-notify/
 # Run from the repo root: bash install.sh
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-INSTALL_DIR="$USERPROFILE/.claude/hooks/claude-notify"
+INSTALL_DIR="$USERPROFILE/.claude/hooks/agentic-cli-notify"
 
-echo "Installing claude-notify to $INSTALL_DIR"
+echo "Installing agentic-cli-notify to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 
 # Copy scripts
@@ -54,8 +54,8 @@ if [ ! -f "$SETTINGS_FILE" ]; then
     echo ""
     echo "Required hooks config (add to settings.json):"
     echo '  "hooks": {'
-    echo '    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "C:\\Users\\'"$USERNAME"'\\.claude\\hooks\\claude-notify\\attention.cmd", "timeout": 10}]}],'
-    echo '    "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command", "command": "C:\\Users\\'"$USERNAME"'\\.claude\\hooks\\claude-notify\\resume.cmd", "timeout": 10}]}]'
+    echo '    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "C:\\Users\\'"$USERNAME"'\\.claude\\hooks\\agentic-cli-notify\\attention.cmd", "timeout": 10}]}],'
+    echo '    "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command", "command": "C:\\Users\\'"$USERNAME"'\\.claude\\hooks\\agentic-cli-notify\\resume.cmd", "timeout": 10}]}]'
     echo '  }'
 else
     echo ""
@@ -74,7 +74,7 @@ echo ""
 echo "NEXT STEPS:"
 echo "  1. Open each Claude Code tab in Windows Terminal"
 echo "  2. Make sure you are FOCUSED on that tab's WT window"
-echo "  3. Run: bash ~/.claude/hooks/claude-notify/setup.sh"
+echo "  3. Run: bash ~/.claude/hooks/agentic-cli-notify/setup.sh"
 echo "  4. Repeat for every Claude Code tab"
 echo ""
 echo "Re-run setup.sh after: WT restart, tab reorder, adding/removing tabs."

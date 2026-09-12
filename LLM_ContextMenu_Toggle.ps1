@@ -11,12 +11,12 @@ $basePaths = @(
 # Run setup inside the new tab so it inherits that tab's WT_SESSION.
 # Use Git Bash explicitly: bash.exe on PATH may be the WSL launcher.
 $setupSnippet = @'
-$notifySetup = Join-Path $env:USERPROFILE '.claude\hooks\claude-notify\setup.sh'
+$notifySetup = Join-Path $env:USERPROFILE '.claude\hooks\agentic-cli-notify\setup.sh'
 $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
 if ((Test-Path -LiteralPath $notifySetup) -and (Test-Path -LiteralPath $gitBash)) {
     & $gitBash $notifySetup
 } else {
-    Write-Warning 'Notification setup skipped: install claude-notify and Git for Windows.'
+    Write-Warning 'Notification setup skipped: install agentic-cli-notify and Git for Windows.'
 }
 '@
 
@@ -91,7 +91,8 @@ foreach ($base in $basePaths) {
     New-Item -Path "$piPath\command" -Force -Value $wtPiCmd | Out-Null
     New-Item -Path "$agentPath\command" -Force -Value $wtAgentCmd | Out-Null
 
-    $scriptPath = "C:\Users\Kostya\LLM_ContextMenu_Toggle.ps1"
+    # Store this checkout's actual path in the registry command.
+    $scriptPath = $PSCommandPath
     $newToggleCmd = "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`" -Mode New"
     $appendToggleCmd = "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`" -Mode Append"
 

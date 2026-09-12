@@ -1,4 +1,4 @@
-# claude-notify
+# agentic-cli-notify
 
 Desktop notifications for Claude Code and Codex CLI on Windows Terminal.
 
@@ -49,7 +49,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-codex.ps1
 ```
 
 This installs the shared notification scripts into
-`~/.claude/hooks/claude-notify/` (the same location used by DevLayout), compiles
+`~/.claude/hooks/agentic-cli-notify/` (the same location used by DevLayout), compiles
 `save-hwnd.exe`, and adds `Stop` and `UserPromptSubmit` commands to
 `$CODEX_HOME/hooks.json`, or `~/.codex/hooks.json` when `CODEX_HOME` is unset.
 Existing hooks are preserved, changed settings are backed up, and rerunning
@@ -64,7 +64,7 @@ Then configure each tab **while that tab and its Windows Terminal window are
 focused** (Git Bash is required for this setup command):
 
 ```powershell
-& 'C:\Program Files\Git\bin\bash.exe' "$env:USERPROFILE/.claude/hooks/claude-notify/setup.sh"
+& 'C:\Program Files\Git\bin\bash.exe' "$env:USERPROFILE/.claude/hooks/agentic-cli-notify/setup.sh"
 ```
 
 The popup says **Codex**, flashes the saved terminal window, and uses the same
@@ -87,17 +87,17 @@ temporary state and invisible test windows; it does not change live tab mappings
 To uninstall Codex integration, remove only the `codex-hook.ps1` handlers from
 `hooks.json`. Keep the shared scripts if Claude Code still uses them.
 
-### Claude Code
+### Claude Code (when used standalone)
 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/SyDRoX/claude-notify.git
-cd claude-notify
+git clone https://github.com/SyDRoX/dev-layout.git
+cd dev-layout/agentic-cli-notify
 bash install.sh
 ```
 
-This copies scripts to `~/.claude/hooks/claude-notify/` and compiles `save-hwnd.exe`.
+This copies scripts to `~/.claude/hooks/agentic-cli-notify/` and compiles `save-hwnd.exe`.
 
 ### 2. Register hooks
 
@@ -112,7 +112,7 @@ Add to your `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Users\\YOUR_USERNAME\\.claude\\hooks\\claude-notify\\attention.cmd",
+            "command": "C:\\Users\\YOUR_USERNAME\\.claude\\hooks\\agentic-cli-notify\\attention.cmd",
             "timeout": 10
           }
         ]
@@ -124,7 +124,7 @@ Add to your `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Users\\YOUR_USERNAME\\.claude\\hooks\\claude-notify\\resume.cmd",
+            "command": "C:\\Users\\YOUR_USERNAME\\.claude\\hooks\\agentic-cli-notify\\resume.cmd",
             "timeout": 10
           }
         ]
@@ -141,7 +141,7 @@ Replace `YOUR_USERNAME` with your Windows username.
 For **every** Claude Code tab, while focused on the correct Windows Terminal window:
 
 ```bash
-bash ~/.claude/hooks/claude-notify/setup.sh
+bash ~/.claude/hooks/agentic-cli-notify/setup.sh
 ```
 
 This captures the window handle (HWND) and tab position so notifications can target the right window and switch to the right tab.
@@ -151,7 +151,7 @@ This captures the window handle (HWND) and tab position so notifications can tar
 ## File Structure
 
 ```
-claude-notify/
+agentic-cli-notify/
   attention.cmd      # Stop hook wrapper (cmd.exe -> PowerShell)
   resume.cmd         # UserPromptSubmit hook wrapper
   notify.ps1         # Main logic: flash window, launch/kill popup
@@ -202,7 +202,7 @@ Each Claude Code tab has a unique `WT_SESSION` environment variable (inherited b
 **No popup appears:**
 - Run `setup.sh` again from the affected tab
 - Check that hooks are registered in `~/.claude/settings.json`
-- Verify `save-hwnd.exe` exists in `~/.claude/hooks/claude-notify/`
+- Verify `save-hwnd.exe` exists in `~/.claude/hooks/agentic-cli-notify/`
 
 **Popup appears but wrong window focuses:**
 - Re-run `setup.sh` from the correct tab while focused on the correct WT window
@@ -212,7 +212,7 @@ Each Claude Code tab has a unique `WT_SESSION` environment variable (inherited b
 - Tab index is position-based (1-9). Re-run `setup.sh` after any tab reorder.
 
 **Crash log:**
-- Check `~/.claude/hooks/claude-notify/popup-crash.log`
+- Check `~/.claude/hooks/agentic-cli-notify/popup-crash.log`
 
 ## License
 

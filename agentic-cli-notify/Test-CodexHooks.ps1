@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # Isolated contract tests. No live config edits, taskbar flashes, or popups.
 $ErrorActionPreference = 'Stop'
-$testDir = Join-Path ([IO.Path]::GetTempPath()) ('claude-notify-tests-' + [guid]::NewGuid().ToString('N'))
+$testDir = Join-Path ([IO.Path]::GetTempPath()) ('agentic-cli-notify-tests-' + [guid]::NewGuid().ToString('N'))
 $notifyDir = Join-Path $testDir 'scripts with spaces'
 $codexDir = Join-Path $testDir 'codex'
 $savedSession = $env:WT_SESSION
@@ -81,7 +81,7 @@ exit 0
     $resolvedTest = [IO.Path]::GetFullPath($testDir)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     if ($resolvedTest.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
-        (Split-Path $resolvedTest -Leaf) -like 'claude-notify-tests-*') {
+        (Split-Path $resolvedTest -Leaf) -like 'agentic-cli-notify-tests-*') {
         Remove-Item -LiteralPath $resolvedTest -Recurse -Force
     }
 }
