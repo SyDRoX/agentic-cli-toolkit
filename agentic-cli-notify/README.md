@@ -45,7 +45,7 @@ When multiple sessions need attention simultaneously, popups stack vertically in
 From this repository, run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install-codex.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\install-codex.ps1
 ```
 
 This installs the shared notification scripts into
@@ -77,7 +77,7 @@ not covered. Hooks outside Windows Terminal are ignored.
 Run the isolated regression checks with:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-CodexHooks.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\Test-CodexHooks.ps1
 ```
 
 `Test-PopupSessions.ps1` additionally shows real Codex test popups on every
@@ -154,8 +154,10 @@ This captures the window handle (HWND) and tab position so notifications can tar
 agentic-cli-notify/
   attention.cmd      # Stop hook wrapper (cmd.exe -> PowerShell)
   resume.cmd         # UserPromptSubmit hook wrapper
-  notify.ps1         # Main logic: flash window, launch/kill popup
-  popup.ps1          # WPF popup: dark theme, click-to-switch, stacking
+  ps1-scripts/       # PowerShell notification, installer, and test scripts
+    notify.ps1       # Main logic: flash window, launch/kill popup
+    popup.ps1        # WPF popup: dark theme, click-to-switch, stacking
+    codex-hook.ps1   # Codex lifecycle hook adapter
   SaveHwnd.cs        # C# source: captures foreground HWND + tab index
   save-hwnd.exe      # Compiled from SaveHwnd.cs (not in git, built by install)
   setup.sh           # Per-tab setup: captures window handle + tab position

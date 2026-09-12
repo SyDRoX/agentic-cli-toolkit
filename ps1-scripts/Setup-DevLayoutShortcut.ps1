@@ -15,7 +15,8 @@ param(
 )
 
 $ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$BatPath      = Join-Path $ScriptDir "LayoutUI.bat"
+$ToolkitDir   = Split-Path -Parent $ScriptDir
+$BatPath      = Join-Path $ToolkitDir "LayoutUI.bat"
 $ShortcutDir  = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
 $ShortcutPath = Join-Path $ShortcutDir "AgenticCliToolkit.lnk"
 

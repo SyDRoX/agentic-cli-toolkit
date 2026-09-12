@@ -239,7 +239,7 @@ function Resolve-TabLauncher {
 
     $agent = if ($Tab.AgentName) { $Tab.AgentName } elseif ($Layout.AgentName) { $Layout.AgentName } else { "Claude" }
     $scriptName = if ($Tab.LauncherScript) { $Tab.LauncherScript } elseif ($Layout.LauncherScript) { $Layout.LauncherScript } else { "launch-claude.ps1" }
-    $launcherPath = Join-Path $PSScriptRoot $scriptName
+    $launcherPath = Join-Path (Join-Path $PSScriptRoot "..\launchers") $scriptName
 
     return @{
         AgentName    = $agent
@@ -319,7 +319,7 @@ function Invoke-LayoutWindow {
         $resolved = Resolve-TabLauncher -Layout $Layout -Tab $tab
         [void]$agents.Add($resolved.AgentName)
         if (-not (Test-Path $resolved.LauncherPath)) {
-            Write-Error "$($resolved.ScriptName) not found next to LayoutEngine.ps1 ($PSScriptRoot)."
+        Write-Error "$($resolved.ScriptName) not found in the launchers directory next to LayoutEngine.ps1 ($PSScriptRoot)."
             return
         }
         if (-not (Test-Path $tab.WorkingDir)) {

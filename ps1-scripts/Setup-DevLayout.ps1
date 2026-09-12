@@ -16,12 +16,13 @@
 #>
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$ToolkitDir = Split-Path -Parent $ScriptDir
 
-$HookSource = Join-Path $ScriptDir "hooks\devlayout-session-save.ps1"
+$HookSource = Join-Path $ToolkitDir "hooks\devlayout-session-save.ps1"
 $HooksDir   = Join-Path $env:USERPROFILE ".claude\hooks"
 $HookDest   = Join-Path $HooksDir "devlayout-session-save.ps1"
 $StateDir   = Join-Path $env:USERPROFILE ".claude\dev-layout"
-$Registrar  = Join-Path $ScriptDir "register-session-hook.js"
+$Registrar  = Join-Path $ToolkitDir "register-session-hook.js"
 
 if (-not (Test-Path $HookSource)) {
     Write-Error "Hook script not found: $HookSource"
@@ -56,6 +57,6 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "Setup complete. Launch with:" -ForegroundColor Green
-Write-Host "  cmd /c `"$ScriptDir\LayoutUI.bat`"" -ForegroundColor Cyan
+Write-Host "  cmd /c `"$ToolkitDir\LayoutUI.bat`"" -ForegroundColor Cyan
 Write-Host "Optional hotkey (Ctrl+Alt+D):" -ForegroundColor Green
 Write-Host "  pwsh -ExecutionPolicy Bypass -File `"$ScriptDir\Setup-DevLayoutShortcut.ps1`"" -ForegroundColor Cyan

@@ -18,7 +18,7 @@ be changed with **Edit tab**.
 Launch a layout from PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Invoke-CustomLayout.ps1 `
+powershell -ExecutionPolicy Bypass -File .\ps1-scripts\Invoke-CustomLayout.ps1 `
   -ConfigPath .\custom-layouts\Main.json -DryRun
 ```
 
@@ -35,7 +35,7 @@ and starts a fresh session if a transcript is missing or corrupt.
 Install the session hook once:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Setup-DevLayout.ps1
+powershell -ExecutionPolicy Bypass -File .\ps1-scripts\Setup-DevLayout.ps1
 ```
 
 ## agentic-cli-notify
@@ -51,7 +51,7 @@ Install Claude/Codex notification hooks from this checkout:
 & 'C:\Program Files\Git\bin\bash.exe' .\agentic-cli-notify\install.sh
 
 # Codex hook installation and registration
-powershell -ExecutionPolicy Bypass -File .\agentic-cli-notify\install-codex.ps1
+powershell -ExecutionPolicy Bypass -File .\agentic-cli-notify\ps1-scripts\install-codex.ps1
 ```
 
 Run `bash ~/.claude/hooks/agentic-cli-notify/setup.sh` from each focused
@@ -66,8 +66,8 @@ folder, with toggles for a new Terminal window or appending to the existing
 window:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\LLM_ContextMenu_Toggle.ps1 -Mode New
-powershell -ExecutionPolicy Bypass -File .\LLM_ContextMenu_Toggle.ps1 -Mode Append
+powershell -ExecutionPolicy Bypass -File .\ps1-scripts\LLM_ContextMenu_Toggle.ps1 -Mode New
+powershell -ExecutionPolicy Bypass -File .\ps1-scripts\LLM_ContextMenu_Toggle.ps1 -Mode Append
 ```
 
 The script stores its own resolved path in the registry, so it does not depend
@@ -78,12 +78,13 @@ on a particular username or checkout location.
 | Path | Purpose |
 |------|---------|
 | `LayoutUI.bat` / `layout_ui.py` | Layout composer UI |
-| `Invoke-CustomLayout.ps1` | Launches a JSON layout |
-| `LayoutEngine.ps1` | Windows Terminal layout engine |
-| `SessionSlot.ps1` | Deterministic session-slot and resume logic |
-| `launch-*.ps1` | Per-agent tab launchers |
+| `ps1-scripts/` | Main PowerShell scripts |
+| `ps1-scripts/Invoke-CustomLayout.ps1` | Launches a JSON layout |
+| `ps1-scripts/LayoutEngine.ps1` | Windows Terminal layout engine |
+| `ps1-scripts/SessionSlot.ps1` | Deterministic session-slot and resume logic |
+| `launchers/` | Per-agent tab launchers |
 | `agentic-cli-notify/` | Bundled multi-agent notification component |
-| `LLM_ContextMenu_Toggle.ps1` | Explorer integration |
+| `ps1-scripts/LLM_ContextMenu_Toggle.ps1` | Explorer integration |
 | `custom-layouts/` | Example layout presets |
 | `repos.json` | Editable repository catalog |
 

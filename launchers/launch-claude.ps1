@@ -23,7 +23,7 @@ $tabIndex = $args[0]
 $label    = $args[1]
 if ($args[2]) { $windowNum = $args[2] } else { $windowNum = 1 }
 
-. (Join-Path $PSScriptRoot "SessionSlot.ps1")
+. (Join-Path $PSScriptRoot "..\ps1-scripts\SessionSlot.ps1")
 
 $StateDir = Join-Path $env:USERPROFILE ".claude\dev-layout"
 if (-not (Test-Path $StateDir)) {

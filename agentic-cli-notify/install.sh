@@ -5,19 +5,20 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PS1_DIR="$SCRIPT_DIR/ps1-scripts"
 INSTALL_DIR="$USERPROFILE/.claude/hooks/agentic-cli-notify"
 
 echo "Installing agentic-cli-notify to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 
 # Copy scripts
-cp "$SCRIPT_DIR/notify.ps1"   "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/popup.ps1"    "$INSTALL_DIR/"
+cp "$PS1_DIR/notify.ps1"   "$INSTALL_DIR/"
+cp "$PS1_DIR/popup.ps1"    "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/attention.cmd" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/resume.cmd"   "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/setup.sh"     "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/SaveHwnd.cs"  "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/codex-hook.ps1" "$INSTALL_DIR/"
+cp "$PS1_DIR/codex-hook.ps1" "$INSTALL_DIR/"
 
 # Compile save-hwnd.exe
 CSC="/c/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
