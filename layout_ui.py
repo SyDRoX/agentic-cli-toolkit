@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 ROOT = Path(__file__).resolve().parent
 PRESETS_DIR = ROOT / "custom-layouts"
 REPOS_FILE = ROOT / "repos.json"
-INVOKE_PS1 = ROOT / "Invoke-CustomLayout.ps1"
+INVOKE_PS1 = ROOT / "ps1-scripts" / "Invoke-CustomLayout.ps1"
 SLOT_START = 100
 
 DEFAULT_REPOS = [

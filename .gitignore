@@ -4,3 +4,8 @@ __pycache__/
 
 # Windows shortcut files
 *.lnk
+
+# User-created layout presets; keep the checked-in examples
+custom-layouts/*.json
+!custom-layouts/Main.json
+!custom-layouts/Mixed Example.json
