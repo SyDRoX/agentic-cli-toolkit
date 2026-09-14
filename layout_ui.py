@@ -51,6 +51,8 @@ CODEX_MODELS = [
     "", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
 ]
 MODELS_BY_AGENT = {"claude": CLAUDE_MODELS, "codex": CODEX_MODELS}
+# Preselect a real model rather than the blank "use CLI default" entry.
+DEFAULT_MODEL_BY_AGENT = {"claude": "sonnet", "codex": "gpt-5.6-sol"}
 
 # --effort (claude) / model_reasoning_effort (codex) - same value set, both real.
 EFFORT_LEVELS = ["", "low", "medium", "high", "xhigh", "max"]
@@ -118,8 +120,9 @@ class LayoutUI(tk.Tk):
         self.window_num_var = tk.IntVar(value=SLOT_START)
         self.repos = load_repos()
         self.repo_var = tk.StringVar(value=self.repos[0]["label"] if self.repos else "")
+        self.tab_title_var = tk.StringVar(value="")
         self.agent_var = tk.StringVar(value=AGENTS[0][0])
-        self.model_var = tk.StringVar(value="")
+        self.model_var = tk.StringVar(value=DEFAULT_MODEL_BY_AGENT.get(AGENT_BY_LABEL[AGENTS[0][0]], ""))
         self.effort_var = tk.StringVar(value=DEFAULT_EFFORT)
         self.context_var = tk.StringVar(value=CONTEXT_WINDOWS[0])
 
@@ -152,20 +155,18 @@ class LayoutUI(tk.Tk):
             side=tk.RIGHT, padx=2
         )
 
-        body = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
-        body.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        body = ttk.Frame(self, padding=8)
+        body.pack(fill=tk.BOTH, expand=True)
 
-        left = ttk.Frame(body, padding=4)
-        right = ttk.Frame(body, padding=4)
-        body.add(left, weight=1)
-        body.add(right, weight=2)
+        windows_frame = ttk.LabelFrame(body, text="Terminal windows", padding=4)
+        windows_frame.pack(fill=tk.X, pady=(0, 8))
 
-        ttk.Label(left, text="Terminal windows").pack(anchor=tk.W)
-        self.window_list = tk.Listbox(left, exportselection=False, height=16)
-        self.window_list.pack(fill=tk.BOTH, expand=True, pady=4)
+        self.window_list = tk.Listbox(windows_frame, exportselection=False, height=6)
+        self.window_list.pack(fill=tk.X, expand=True, pady=4)
         self.window_list.bind("<<ListboxSelect>>", lambda _e: self._on_select_window())
+        self.window_list.bind("<Delete>", lambda _e: self._remove_window())
 
-        win_btns = ttk.Frame(left)
+        win_btns = ttk.Frame(windows_frame)
         win_btns.pack(fill=tk.X)
         ttk.Button(win_btns, text="Add window", command=self._add_window).pack(
             side=tk.LEFT, padx=2
@@ -173,6 +174,9 @@ class LayoutUI(tk.Tk):
         ttk.Button(win_btns, text="Remove", command=self._remove_window).pack(
             side=tk.LEFT, padx=2
         )
+
+        right = ttk.Frame(body)
+        right.pack(fill=tk.BOTH, expand=True)
 
         form = ttk.LabelFrame(right, text="Selected window", padding=8)
         form.pack(fill=tk.X)
@@ -207,28 +211,30 @@ class LayoutUI(tk.Tk):
         tabs_frame = ttk.LabelFrame(right, text="Tabs (repo + agent)", padding=8)
         tabs_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
-        cols = ("title", "agent", "model", "effort", "ctx", "path")
+        cols = ("title", "agent", "model", "effort", "context", "path")
         self.tabs_tree = ttk.Treeview(tabs_frame, columns=cols, show="headings", height=10)
-        self.tabs_tree.heading("title", text="Repo")
+        self.tabs_tree.heading("title", text="Title")
         self.tabs_tree.heading("agent", text="Agent")
         self.tabs_tree.heading("model", text="Model")
         self.tabs_tree.heading("effort", text="Effort")
-        self.tabs_tree.heading("ctx", text="Ctx")
+        self.tabs_tree.heading("context", text="Context window")
         self.tabs_tree.heading("path", text="Working dir")
         self.tabs_tree.column("title", width=90, stretch=False)
         self.tabs_tree.column("agent", width=90, stretch=False)
         self.tabs_tree.column("model", width=110, stretch=False)
         self.tabs_tree.column("effort", width=60, stretch=False)
-        self.tabs_tree.column("ctx", width=60, stretch=False)
+        self.tabs_tree.column("context", width=100, stretch=False)
         self.tabs_tree.column("path", width=280)
         self.tabs_tree.pack(fill=tk.BOTH, expand=True)
+        self.tabs_tree.bind("<Double-1>", lambda _e: self._edit_tab())
+        self.tabs_tree.bind("<Delete>", lambda _e: self._remove_tab())
 
-        add_row = ttk.Frame(tabs_frame)
-        add_row.pack(fill=tk.X, pady=(8, 0))
+        fields_row = ttk.Frame(tabs_frame)
+        fields_row.pack(fill=tk.X, pady=(8, 0))
 
-        ttk.Label(add_row, text="Repo").pack(side=tk.LEFT)
+        ttk.Label(fields_row, text="Repo").pack(side=tk.LEFT)
         self.repo_combo = ttk.Combobox(
-            add_row,
+            fields_row,
             textvariable=self.repo_var,
             values=[r["label"] for r in self.repos],
             state="readonly",
@@ -236,9 +242,12 @@ class LayoutUI(tk.Tk):
         )
         self.repo_combo.pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(add_row, text="Agent").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(fields_row, text="Title").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Entry(fields_row, textvariable=self.tab_title_var, width=12).pack(side=tk.LEFT, padx=4)
+
+        ttk.Label(fields_row, text="Agent").pack(side=tk.LEFT, padx=(8, 0))
         self.agent_combo = ttk.Combobox(
-            add_row,
+            fields_row,
             textvariable=self.agent_var,
             values=[a[0] for a in AGENTS],
             state="readonly",
@@ -247,19 +256,22 @@ class LayoutUI(tk.Tk):
         self.agent_combo.pack(side=tk.LEFT, padx=4)
         self.agent_combo.bind("<<ComboboxSelected>>", lambda _e: self._refresh_model_choices())
 
-        ttk.Label(add_row, text="Model").pack(side=tk.LEFT, padx=(8, 0))
-        self.model_combo = ttk.Combobox(add_row, textvariable=self.model_var, width=16)
+        ttk.Label(fields_row, text="Model").pack(side=tk.LEFT, padx=(8, 0))
+        self.model_combo = ttk.Combobox(fields_row, textvariable=self.model_var, width=16)
         self.model_combo.pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(add_row, text="Effort").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(fields_row, text="Effort").pack(side=tk.LEFT, padx=(8, 0))
         ttk.Combobox(
-            add_row, textvariable=self.effort_var, values=EFFORT_LEVELS, state="readonly", width=8
+            fields_row, textvariable=self.effort_var, values=EFFORT_LEVELS, state="readonly", width=8
         ).pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(add_row, text="Ctx").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(fields_row, text="Context window").pack(side=tk.LEFT, padx=(8, 0))
         ttk.Combobox(
-            add_row, textvariable=self.context_var, values=CONTEXT_WINDOWS, state="readonly", width=8
+            fields_row, textvariable=self.context_var, values=CONTEXT_WINDOWS, state="readonly", width=8
         ).pack(side=tk.LEFT, padx=4)
+
+        add_row = ttk.Frame(tabs_frame)
+        add_row.pack(fill=tk.X, pady=(4, 0))
 
         ttk.Button(add_row, text="Add tab", command=self._add_tab).pack(side=tk.LEFT, padx=4)
         ttk.Button(add_row, text="Edit tab", command=self._edit_tab).pack(side=tk.LEFT, padx=2)
@@ -621,7 +633,7 @@ class LayoutUI(tk.Tk):
         agent_key = AGENT_BY_LABEL.get(self.agent_var.get())
         self.model_combo["values"] = MODELS_BY_AGENT.get(agent_key, [""])
         if self.model_var.get() not in self.model_combo["values"]:
-            self.model_var.set("")
+            self.model_var.set(DEFAULT_MODEL_BY_AGENT.get(agent_key, ""))
 
     def _add_tab(self) -> None:
         title = self.repo_var.get()
@@ -636,7 +648,7 @@ class LayoutUI(tk.Tk):
             return
         self._current_tabs().append(
             {
-                "title": repo["label"],
+                "title": self.tab_title_var.get().strip() or repo["label"],
                 "workingDir": repo["path"],
                 "agent": agent_key,
                 "model": self.model_var.get().strip(),
@@ -644,6 +656,7 @@ class LayoutUI(tk.Tk):
                 "contextWindow": self.context_var.get().strip(),
             }
         )
+        self.tab_title_var.set("")
         self._refresh_tabs_tree()
 
     def _edit_tab(self) -> None:
@@ -658,56 +671,73 @@ class LayoutUI(tk.Tk):
         form = ttk.Frame(dialog, padding=12)
         form.pack(fill=tk.BOTH, expand=True)
         repo_labels = [repo["label"] for repo in self.repos]
+        # Title and working dir are independent - only prefill the repo picker
+        # when the path happens to match a catalog entry; don't force one.
         repo_label = next(
             (repo["label"] for repo in self.repos if repo["path"] == tab.get("workingDir")),
-            tab.get("title", ""),
+            "",
         )
+        title_var = tk.StringVar(value=tab.get("title", ""))
         repo_var = tk.StringVar(value=repo_label)
         agent_var = tk.StringVar(value=AGENT_BY_KEY.get(tab.get("agent", ""), AGENTS[0][0]))
-        model_var = tk.StringVar(value=tab.get("model", ""))
+        edit_agent_key = AGENT_BY_LABEL.get(agent_var.get())
+        model_var = tk.StringVar(
+            value=tab.get("model") or DEFAULT_MODEL_BY_AGENT.get(edit_agent_key, "")
+        )
         effort_var = tk.StringVar(value=tab.get("effort", ""))
         context_var = tk.StringVar(value=tab.get("contextWindow", "") or CONTEXT_WINDOWS[0])
-        ttk.Label(form, text="Repo", width=12).grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(form, text="Title", width=12).grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Entry(form, textvariable=title_var, width=36).grid(row=0, column=1, sticky="ew", pady=4)
+
+        ttk.Label(form, text="Working dir", width=12).grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(form, text=tab.get("workingDir", ""), width=36).grid(row=1, column=1, sticky="w", pady=4)
+
+        ttk.Label(form, text="Repo (change dir)", width=12).grid(row=2, column=0, sticky="w", pady=4)
         ttk.Combobox(form, textvariable=repo_var, values=repo_labels, state="readonly", width=34).grid(
-            row=0, column=1, sticky="ew", pady=4
+            row=2, column=1, sticky="ew", pady=4
         )
-        ttk.Label(form, text="Agent", width=12).grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(form, text="Agent", width=12).grid(row=3, column=0, sticky="w", pady=4)
         agent_combo = ttk.Combobox(
             form, textvariable=agent_var, values=[a[0] for a in AGENTS], state="readonly", width=34
         )
-        agent_combo.grid(row=1, column=1, sticky="ew", pady=4)
+        agent_combo.grid(row=3, column=1, sticky="ew", pady=4)
 
-        ttk.Label(form, text="Model", width=12).grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Label(form, text="Model", width=12).grid(row=4, column=0, sticky="w", pady=4)
         model_combo = ttk.Combobox(form, textvariable=model_var, width=34)
-        model_combo.grid(row=2, column=1, sticky="ew", pady=4)
+        model_combo.grid(row=4, column=1, sticky="ew", pady=4)
 
         def refresh_model_values() -> None:
-            model_combo["values"] = MODELS_BY_AGENT.get(AGENT_BY_LABEL.get(agent_var.get()), [""])
+            agent_key = AGENT_BY_LABEL.get(agent_var.get())
+            model_combo["values"] = MODELS_BY_AGENT.get(agent_key, [""])
+            if model_var.get() not in model_combo["values"]:
+                model_var.set(DEFAULT_MODEL_BY_AGENT.get(agent_key, ""))
 
         agent_combo.bind("<<ComboboxSelected>>", lambda _e: refresh_model_values())
         refresh_model_values()
 
-        ttk.Label(form, text="Effort", width=12).grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Label(form, text="Effort", width=12).grid(row=5, column=0, sticky="w", pady=4)
         ttk.Combobox(form, textvariable=effort_var, values=EFFORT_LEVELS, state="readonly", width=34).grid(
-            row=3, column=1, sticky="ew", pady=4
+            row=5, column=1, sticky="ew", pady=4
         )
 
-        ttk.Label(form, text="Context", width=12).grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Label(form, text="Context window", width=14).grid(row=6, column=0, sticky="w", pady=4)
         ttk.Combobox(
             form, textvariable=context_var, values=CONTEXT_WINDOWS, state="readonly", width=34
-        ).grid(row=4, column=1, sticky="ew", pady=4)
+        ).grid(row=6, column=1, sticky="ew", pady=4)
 
         form.columnconfigure(1, weight=1)
 
         def save() -> None:
-            repo = next((item for item in self.repos if item["label"] == repo_var.get()), None)
+            title = title_var.get().strip()
             agent = AGENT_BY_LABEL.get(agent_var.get())
-            if not repo or not agent:
-                messagebox.showerror("Tab", "Select a repo and agent.", parent=dialog)
+            if not title or not agent:
+                messagebox.showerror("Tab", "Title and agent are required.", parent=dialog)
                 return
+            repo = next((item for item in self.repos if item["label"] == repo_var.get()), None)
+            working_dir = repo["path"] if repo else tab.get("workingDir", "")
             tab.update(
-                title=repo["label"],
-                workingDir=repo["path"],
+                title=title,
+                workingDir=working_dir,
                 agent=agent,
                 model=model_var.get().strip(),
                 effort=effort_var.get().strip(),
@@ -720,7 +750,7 @@ class LayoutUI(tk.Tk):
             dialog.destroy()
 
         actions = ttk.Frame(form)
-        actions.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        actions.grid(row=7, column=0, columnspan=2, sticky="e", pady=(12, 0))
         ttk.Button(actions, text="Save", command=save).pack(side=tk.LEFT, padx=2)
         ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=2)
         dialog.grab_set()
