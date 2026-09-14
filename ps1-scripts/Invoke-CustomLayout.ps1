@@ -70,6 +70,9 @@ foreach ($win in $config.windows) {
             WorkingDir     = [string]$t.workingDir
             AgentName      = $mapped.AgentName
             LauncherScript = $mapped.LauncherScript
+            Model          = if ($t.model) { [string]$t.model } else { "" }
+            Effort         = if ($t.effort) { [string]$t.effort } else { "" }
+            ContextWindow  = if ($t.contextWindow) { [string]$t.contextWindow } else { "" }
         }
     }
 

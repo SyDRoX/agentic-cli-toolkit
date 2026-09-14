@@ -6,20 +6,29 @@
 param(
     [Parameter(Position = 0)][string]$TabIndex,
     [Parameter(Position = 1)][string]$Label,
-    [Parameter(Position = 2)][string]$WindowNum
+    [Parameter(Position = 2)][string]$WindowNum,
+    [Parameter(Position = 3)][string]$Model,
+    [Parameter(Position = 4)][string]$Effort,
+    [Parameter(Position = 5)][string]$ContextWindow
 )
 
 $cwd = (Get-Location).Path.TrimEnd('\')
+
+# `-c` config overrides work on both `resume` and a fresh session, unlike `-m`
+# which `resume` doesn't accept - use `-c model=` uniformly for both paths.
+$extraArgs = @()
+if ($Model)  { $extraArgs += @("-c", "model=$Model") }
+if ($Effort) { $extraArgs += @("-c", "model_reasoning_effort=$Effort") }
 
 Write-Host "[DevLayout] $Label" -ForegroundColor Cyan
 Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 
 # `--last` exits non-zero when this repo has no saved interactive session.
 # Start a new one then; the next launch resumes it automatically.
-& codex resume --last -C $cwd
+& codex resume --last -C $cwd @extraArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[DevLayout] no saved Codex session for this repo; starting one." -ForegroundColor DarkGray
-    & codex -C $cwd
+    & codex -C $cwd @extraArgs
 }
 
 exit $LASTEXITCODE

@@ -9,7 +9,11 @@
 param(
     [Parameter(Position = 0)][string]$TabIndex,
     [Parameter(Position = 1)][string]$Label,
-    [Parameter(Position = 2)][string]$WindowNum
+    [Parameter(Position = 2)][string]$WindowNum,
+    # Model/Effort/ContextWindow: not wired up here, pi's model+context are fixed below.
+    [Parameter(Position = 3)][string]$Model,
+    [Parameter(Position = 4)][string]$Effort,
+    [Parameter(Position = 5)][string]$ContextWindow
 )
 
 $ModelId = "tencent/hy4-preview"

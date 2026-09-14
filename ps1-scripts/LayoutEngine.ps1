@@ -271,7 +271,12 @@ function Build-LayoutSegments {
         $resolved = Resolve-TabLauncher -Layout $Layout -Tab $tab
         $label = "$($tab.Title) / $($resolved.AgentName) $n"
         if ($i -eq 0) { $lead = "-w new" } else { $lead = "new-tab" }
-        $segments += "$lead --title `"$($tab.Title)`" -d `"$dir`" `"$PwshExe`" -NoExit -ExecutionPolicy Bypass -Command `"& '$($resolved.LauncherPath)' $n '$label' $($Layout.WindowNum)`""
+        # Model/Effort/ContextWindow are always passed positionally so every launcher's
+        # param block lines up; scripts that don't use one just ignore it.
+        $model   = if ($tab.Model)         { $tab.Model }         else { "" }
+        $effort  = if ($tab.Effort)        { $tab.Effort }        else { "" }
+        $ctxWin  = if ($tab.ContextWindow) { $tab.ContextWindow } else { "" }
+        $segments += "$lead --title `"$($tab.Title)`" -d `"$dir`" `"$PwshExe`" -NoExit -ExecutionPolicy Bypass -Command `"& '$($resolved.LauncherPath)' $n '$label' $($Layout.WindowNum) '$model' '$effort' '$ctxWin'`""
     }
     return $segments
 }

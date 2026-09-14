@@ -19,9 +19,12 @@
 # Clear inherited CLAUDECODE env var to prevent a nested-session error
 Remove-Item Env:CLAUDECODE -ErrorAction SilentlyContinue
 
-$tabIndex = $args[0]
-$label    = $args[1]
+$tabIndex      = $args[0]
+$label         = $args[1]
 if ($args[2]) { $windowNum = $args[2] } else { $windowNum = 1 }
+$model         = $args[3]
+$effort        = $args[4]
+$contextWindow = $args[5]
 
 . (Join-Path $PSScriptRoot "..\ps1-scripts\SessionSlot.ps1")
 
@@ -67,6 +70,22 @@ $cwd = (Get-Location).Path.TrimEnd('\')
 $slot = Resolve-SlotResume -WindowNum $windowNum -TabIndex $tabIndex `
                            -WorkingDir $cwd -StateDir $StateDir
 
+# ---------------------------------------------------------------------------
+# Model / effort / context window
+# ---------------------------------------------------------------------------
+# [1m] is a real model-id suffix (see claude-*[1m] entries in ~/.claude.json),
+# not a CLI flag; --autocompact is the only real lever for 0.25m/0.5m.
+$extraArgs = @()
+$resolvedModel = $model
+if ($model -and $contextWindow -eq "MAX") { $resolvedModel = "$model[1m]" }
+if ($resolvedModel) { $extraArgs += @("--model", $resolvedModel) }
+if ($effort)         { $extraArgs += @("--effort", $effort) }
+switch ($contextWindow) {
+    "0.25m" { $extraArgs += @("--autocompact", "250000") }
+    "0.5m"  { $extraArgs += @("--autocompact", "500000") }
+    "MAX"   { $extraArgs += @("--autocompact", "1000000") }
+}
+
 # Let the SessionStart hook know which slot to persist into. Set before Claude
 # launches so the hook fires with the slot already identified.
 $env:DEVLAYOUT_WINDOW = $windowNum
@@ -81,16 +100,16 @@ Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 
 if ($slot.ResumeId) {
     Write-Host "[DevLayout] resuming $($slot.ResumeId) via $($slot.Source)" -ForegroundColor DarkGray
-    & claude --dangerously-skip-permissions --resume $slot.ResumeId
+    & claude --dangerously-skip-permissions --resume $slot.ResumeId @extraArgs
 
     # Self-heal: if the resume is rejected (deleted or corrupt transcript), fall
     # back to a fresh session rather than leaving a dead tab. The SessionStart
     # hook records the new id, so the next launch resumes that instead.
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "[DevLayout] resume of $($slot.ResumeId) failed (exit $LASTEXITCODE). Starting a fresh session; it will be remembered for next launch."
-        & claude --dangerously-skip-permissions
+        & claude --dangerously-skip-permissions @extraArgs
     }
 } else {
     Write-Host "[DevLayout] new session, pinned to $($slot.DefaultSessionId)" -ForegroundColor DarkGray
-    & claude --dangerously-skip-permissions --session-id $slot.DefaultSessionId
+    & claude --dangerously-skip-permissions --session-id $slot.DefaultSessionId @extraArgs
 }
