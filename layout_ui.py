@@ -83,9 +83,13 @@ DEFAULT_MODEL_BY_AGENT = {"claude": "sonnet", "codex": "gpt-5.6-sol"}
 EFFORT_LEVELS = ["", "low", "medium", "high", "xhigh", "max"]
 DEFAULT_EFFORT = "medium"
 
-# Claude only: 0.25m/0.5m -> --autocompact tokens; MAX -> [1m] model suffix + --autocompact 1M.
-# Codex has no equivalent CLI flag, so this is ignored for codex/pi/cursor tabs.
-CONTEXT_WINDOWS = ["default", "0.25m", "0.5m", "MAX"]
+# Claude ships exactly one context suffix ([1m]); smaller windows are not selectable.
+CLAUDE_CONTEXT_WINDOWS = ["default[1m]"]
+# Codex takes an arbitrary -c model_context_window=N; models report 272k stock, 872k max.
+CODEX_CONTEXT_WINDOWS = ["default", "0.25m", "0.5m", "MAX"]
+CONTEXT_WINDOWS_BY_AGENT = {"claude": CLAUDE_CONTEXT_WINDOWS, "codex": CODEX_CONTEXT_WINDOWS}
+DEFAULT_CONTEXT_BY_AGENT = {"claude": "default[1m]", "codex": "0.25m"}
+CONTEXT_WINDOWS = CLAUDE_CONTEXT_WINDOWS
 
 
 def load_repos() -> list[dict[str, str]]:
@@ -437,7 +441,8 @@ class LayoutUI(ctk.CTk):
         self._option(fields_row, self.effort_var, EFFORT_LEVELS, width=90).pack(side=tk.LEFT, padx=4)
 
         self._label(fields_row, "Context window").pack(side=tk.LEFT, padx=(8, 0))
-        self._option(fields_row, self.context_var, CONTEXT_WINDOWS, width=90).pack(side=tk.LEFT, padx=4)
+        self.context_combo = self._option(fields_row, self.context_var, CONTEXT_WINDOWS, width=90)
+        self.context_combo.pack(side=tk.LEFT, padx=4)
 
         add_row = ctk.CTkFrame(tabs_frame, fg_color="transparent")
         add_row.pack(fill=tk.X, padx=8, pady=(4, 8))
@@ -824,6 +829,10 @@ class LayoutUI(ctk.CTk):
         self.model_combo.configure(values=values)
         if self.model_var.get() not in values:
             self.model_var.set(DEFAULT_MODEL_BY_AGENT.get(agent_key, ""))
+        contexts = CONTEXT_WINDOWS_BY_AGENT.get(agent_key, [""])
+        self.context_combo.configure(values=contexts)
+        if self.context_var.get() not in contexts:
+            self.context_var.set(DEFAULT_CONTEXT_BY_AGENT.get(agent_key, ""))
 
     def _add_tab(self) -> None:
         title = self.repo_var.get()
@@ -873,7 +882,9 @@ class LayoutUI(ctk.CTk):
             value=tab.get("model") or DEFAULT_MODEL_BY_AGENT.get(edit_agent_key, "")
         )
         effort_var = tk.StringVar(value=tab.get("effort", ""))
-        context_var = tk.StringVar(value=tab.get("contextWindow", "") or CONTEXT_WINDOWS[0])
+        context_var = tk.StringVar(
+            value=tab.get("contextWindow", "") or DEFAULT_CONTEXT_BY_AGENT.get(edit_agent_key, "")
+        )
 
         self._label(form, "Title", width=110).grid(row=0, column=0, sticky="w", pady=4)
         self._entry(form, title_var, width=280).grid(row=0, column=1, sticky="ew", pady=4)
@@ -908,8 +919,10 @@ class LayoutUI(ctk.CTk):
             model_combo.configure(values=values)
             if model_var.get() not in values:
                 model_var.set(DEFAULT_MODEL_BY_AGENT.get(agent_key, ""))
-
-        refresh_model_values()
+            contexts = CONTEXT_WINDOWS_BY_AGENT.get(agent_key, [""])
+            context_combo.configure(values=contexts)
+            if context_var.get() not in contexts:
+                context_var.set(DEFAULT_CONTEXT_BY_AGENT.get(agent_key, ""))
 
         self._label(form, "Effort", width=110).grid(row=5, column=0, sticky="w", pady=4)
         self._option(form, effort_var, EFFORT_LEVELS, width=280).grid(
@@ -917,9 +930,10 @@ class LayoutUI(ctk.CTk):
         )
 
         self._label(form, "Context window", width=110).grid(row=6, column=0, sticky="w", pady=4)
-        self._option(form, context_var, CONTEXT_WINDOWS, width=280).grid(
-            row=6, column=1, sticky="ew", pady=4
-        )
+        context_combo = self._option(form, context_var, CONTEXT_WINDOWS, width=280)
+        context_combo.grid(row=6, column=1, sticky="ew", pady=4)
+
+        refresh_model_values()
 
         form.columnconfigure(1, weight=1)
 

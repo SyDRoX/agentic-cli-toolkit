@@ -20,6 +20,13 @@ $extraArgs = @()
 if ($Model)  { $extraArgs += @("-c", "model=$Model") }
 if ($Effort) { $extraArgs += @("-c", "model_reasoning_effort=$Effort") }
 
+# Stock window is 272k; MAX only pays off on models whose max_context_window is 872k.
+switch ($ContextWindow) {
+    "0.25m" { $extraArgs += @("-c", "model_context_window=250000") }
+    "0.5m"  { $extraArgs += @("-c", "model_context_window=500000") }
+    "MAX"   { $extraArgs += @("-c", "model_context_window=872000") }
+}
+
 Write-Host "[DevLayout] $Label" -ForegroundColor Cyan
 Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 

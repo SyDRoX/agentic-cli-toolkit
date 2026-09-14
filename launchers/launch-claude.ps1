@@ -73,18 +73,13 @@ $slot = Resolve-SlotResume -WindowNum $windowNum -TabIndex $tabIndex `
 # ---------------------------------------------------------------------------
 # Model / effort / context window
 # ---------------------------------------------------------------------------
-# [1m] is a real model-id suffix (see claude-*[1m] entries in ~/.claude.json),
-# not a CLI flag; --autocompact is the only real lever for 0.25m/0.5m.
+# [1m] is the only context suffix Claude accepts (verified against the binary:
+# claude-*[1m] only, no [2m]/[256k]), so context size is not a per-tab choice.
 $extraArgs = @()
 $resolvedModel = $model
-if ($model -and $contextWindow -eq "MAX") { $resolvedModel = "$model[1m]" }
+if ($model -and $contextWindow -eq "default[1m]") { $resolvedModel = "$model[1m]" }
 if ($resolvedModel) { $extraArgs += @("--model", $resolvedModel) }
 if ($effort)         { $extraArgs += @("--effort", $effort) }
-switch ($contextWindow) {
-    "0.25m" { $extraArgs += @("--autocompact", "250000") }
-    "0.5m"  { $extraArgs += @("--autocompact", "500000") }
-    "MAX"   { $extraArgs += @("--autocompact", "1000000") }
-}
 
 # Let the SessionStart hook know which slot to persist into. Set before Claude
 # launches so the hook fires with the slot already identified.

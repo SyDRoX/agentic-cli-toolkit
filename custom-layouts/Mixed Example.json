@@ -14,7 +14,8 @@
         {
           "title": "PS-2",
           "workingDir": "C:\\repos2\\PotatoSandwich2",
-          "agent": "codex"
+          "agent": "codex",
+          "contextWindow": "0.25m"
         },
         {
           "title": "ORMI-1",
@@ -36,7 +37,8 @@
         {
           "title": "ORMI-2",
           "workingDir": "C:\\repos2\\ormi-unity2",
-          "agent": "codex"
+          "agent": "codex",
+          "contextWindow": "0.25m"
         },
         {
           "title": "ORMI-3",
