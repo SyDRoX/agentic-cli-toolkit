@@ -14,7 +14,32 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-ROOT = Path(__file__).resolve().parent
+import customtkinter as ctk
+
+from ui_theme import (
+    FONT_BODY,
+    FONT_LABEL,
+    apply_appearance_mode,
+    apply_titlebar_color,
+    detect_os_mode,
+    listbox_kwargs,
+    resolve_color,
+    style_treeview,
+)
+
+
+def _root_dir() -> Path:
+    """Repo root: the folder holding the exe when frozen, else this file's folder.
+
+    A onefile build unpacks to a temp dir, so __file__ would point away from the
+    custom-layouts/, repos.json and ps1-scripts/ that must stay beside the exe.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+ROOT = _root_dir()
 PRESETS_DIR = ROOT / "custom-layouts"
 REPOS_FILE = ROOT / "repos.json"
 INVOKE_PS1 = ROOT / "ps1-scripts" / "Invoke-CustomLayout.ps1"
@@ -105,12 +130,73 @@ def collect_used_window_nums(exclude: Path | None = None) -> set[int]:
     return used
 
 
-class LayoutUI(tk.Tk):
+class Spinbox(ctk.CTkFrame):
+    """customtkinter has no spinbox, so pair a themed entry with clamped -/+ buttons."""
+
+    def __init__(
+        self,
+        master: any,
+        *,
+        variable: tk.IntVar,
+        from_: int,
+        to: int,
+        mode: str,
+        width: int = 54,
+    ) -> None:
+        super().__init__(master, fg_color="transparent")
+        self._var = variable
+        self._from = from_
+        self._to = to
+        ctk.CTkButton(
+            self,
+            text="-",
+            width=26,
+            font=FONT_BODY,
+            command=lambda: self._step(-1),
+            fg_color=resolve_color("button", mode),
+            hover_color=resolve_color("button_hover", mode),
+            text_color=resolve_color("text", mode),
+        ).pack(side=tk.LEFT)
+        ctk.CTkEntry(
+            self,
+            textvariable=variable,
+            width=width,
+            justify="center",
+            font=FONT_BODY,
+            fg_color=resolve_color("surface", mode),
+            border_color=resolve_color("line", mode),
+            text_color=resolve_color("text", mode),
+        ).pack(side=tk.LEFT, padx=2)
+        ctk.CTkButton(
+            self,
+            text="+",
+            width=26,
+            font=FONT_BODY,
+            command=lambda: self._step(1),
+            fg_color=resolve_color("button", mode),
+            hover_color=resolve_color("button_hover", mode),
+            text_color=resolve_color("text", mode),
+        ).pack(side=tk.LEFT)
+
+    def _step(self, delta: int) -> None:
+        try:
+            current = int(self._var.get())
+        except (tk.TclError, ValueError):
+            current = self._from
+        self._var.set(max(self._from, min(self._to, current + delta)))
+
+
+class LayoutUI(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
+        self.mode = detect_os_mode()
+        apply_appearance_mode(self.mode)
+        style_treeview(self.mode)
+
         self.title("Dev Layout Composer")
-        self.geometry("920x640")
-        self.minsize(800, 520)
+        self.geometry("1120x760")
+        self.minsize(980, 600)
+        self.configure(fg_color=resolve_color("frame", self.mode))
 
         PRESETS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -136,80 +222,172 @@ class LayoutUI(tk.Tk):
         self._new_preset(initial=True)
         self._refresh_preset_list()
 
-    def _build(self) -> None:
-        top = ttk.Frame(self, padding=8)
-        top.pack(fill=tk.X)
+    # --- themed widget factories ----------------------------------------
 
-        ttk.Label(top, text="Preset").pack(side=tk.LEFT)
-        self.preset_combo = ttk.Combobox(top, textvariable=self.preset_var, width=28)
-        self.preset_combo.pack(side=tk.LEFT, padx=(6, 4))
-        self.preset_combo.bind("<<ComboboxSelected>>", lambda _e: self._load_selected_preset())
-
-        ttk.Button(top, text="New", command=self._new_preset).pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="Load", command=self._browse_load_preset).pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="Save", command=self._save_preset).pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="Delete", command=self._delete_preset).pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="Repos...", command=self._manage_repos).pack(side=tk.LEFT, padx=(12, 2))
-        ttk.Button(top, text="Launch", command=self._launch).pack(side=tk.RIGHT, padx=2)
-        ttk.Button(top, text="Dry run", command=lambda: self._launch(dry_run=True)).pack(
-            side=tk.RIGHT, padx=2
+    def _label(self, master: any, text: str, *, width: int = 0, muted: bool = False) -> ctk.CTkLabel:
+        return ctk.CTkLabel(
+            master,
+            text=text,
+            width=width,
+            anchor="w",
+            font=FONT_BODY,
+            text_color=resolve_color("muted" if muted else "text", self.mode),
         )
 
-        body = ttk.Frame(self, padding=8)
-        body.pack(fill=tk.BOTH, expand=True)
+    def _button(
+        self, master: any, text: str, command: any, *, width: int = 80, accent: bool = False
+    ) -> ctk.CTkButton:
+        return ctk.CTkButton(
+            master,
+            text=text,
+            command=command,
+            width=width,
+            font=FONT_BODY,
+            corner_radius=6,
+            fg_color=resolve_color("accent" if accent else "button", self.mode),
+            hover_color=resolve_color("accent_hover" if accent else "button_hover", self.mode),
+            text_color=resolve_color("accent_text" if accent else "text", self.mode),
+        )
 
-        windows_frame = ttk.LabelFrame(body, text="Terminal windows", padding=4)
-        windows_frame.pack(fill=tk.X, pady=(0, 8))
+    def _entry(self, master: any, variable: tk.Variable, *, width: int = 140) -> ctk.CTkEntry:
+        return ctk.CTkEntry(
+            master,
+            textvariable=variable,
+            width=width,
+            font=FONT_BODY,
+            fg_color=resolve_color("surface", self.mode),
+            border_color=resolve_color("line", self.mode),
+            text_color=resolve_color("text", self.mode),
+        )
 
-        self.window_list = tk.Listbox(windows_frame, exportselection=False, height=6)
-        self.window_list.pack(fill=tk.X, expand=True, pady=4)
+    def _option(
+        self, master: any, variable: tk.Variable, values: list[str], *, width: int = 120, command: any = None
+    ) -> ctk.CTkOptionMenu:
+        return ctk.CTkOptionMenu(
+            master,
+            variable=variable,
+            values=values,
+            width=width,
+            font=FONT_BODY,
+            command=command,
+            fg_color=resolve_color("button", self.mode),
+            button_color=resolve_color("accent", self.mode),
+            button_hover_color=resolve_color("accent_hover", self.mode),
+            text_color=resolve_color("text", self.mode),
+            dropdown_fg_color=resolve_color("panel", self.mode),
+            dropdown_hover_color=resolve_color("button_hover", self.mode),
+            dropdown_text_color=resolve_color("text", self.mode),
+        )
+
+    def _combo(
+        self, master: any, variable: tk.Variable, values: list[str], *, width: int = 150, command: any = None
+    ) -> ctk.CTkComboBox:
+        return ctk.CTkComboBox(
+            master,
+            variable=variable,
+            values=values,
+            width=width,
+            font=FONT_BODY,
+            command=command,
+            fg_color=resolve_color("surface", self.mode),
+            border_color=resolve_color("line", self.mode),
+            button_color=resolve_color("accent", self.mode),
+            button_hover_color=resolve_color("accent_hover", self.mode),
+            text_color=resolve_color("text", self.mode),
+            dropdown_fg_color=resolve_color("panel", self.mode),
+            dropdown_hover_color=resolve_color("button_hover", self.mode),
+            dropdown_text_color=resolve_color("text", self.mode),
+        )
+
+    def _section(self, parent: any, title: str) -> tuple[ctk.CTkFrame, ctk.CTkFrame]:
+        """Stand-in for ttk.LabelFrame: an eyebrow caption over a bordered panel."""
+        outer = ctk.CTkFrame(parent, fg_color="transparent")
+        ctk.CTkLabel(
+            outer,
+            text=title.upper(),
+            font=FONT_LABEL,
+            anchor="w",
+            text_color=resolve_color("muted", self.mode),
+        ).pack(fill=tk.X, padx=4, pady=(0, 3))
+        inner = ctk.CTkFrame(
+            outer,
+            fg_color=resolve_color("panel", self.mode),
+            border_color=resolve_color("line", self.mode),
+            border_width=1,
+            corner_radius=6,
+        )
+        inner.pack(fill=tk.BOTH, expand=True)
+        return outer, inner
+
+    # --- layout ----------------------------------------------------------
+
+    def _build(self) -> None:
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.pack(fill=tk.X, padx=8, pady=8)
+
+        self._label(top, "Preset").pack(side=tk.LEFT)
+        self.preset_combo = self._combo(
+            top, self.preset_var, [], width=220, command=lambda _v: self._load_selected_preset()
+        )
+        self.preset_combo.pack(side=tk.LEFT, padx=(6, 4))
+
+        self._button(top, "New", self._new_preset).pack(side=tk.LEFT, padx=2)
+        self._button(top, "Load", self._browse_load_preset).pack(side=tk.LEFT, padx=2)
+        self._button(top, "Save", self._save_preset).pack(side=tk.LEFT, padx=2)
+        self._button(top, "Delete", self._delete_preset).pack(side=tk.LEFT, padx=2)
+        self._button(top, "Repos...", self._manage_repos).pack(side=tk.LEFT, padx=(12, 2))
+        self._button(top, "Launch", self._launch, accent=True).pack(side=tk.RIGHT, padx=2)
+        self._button(top, "Dry run", lambda: self._launch(dry_run=True)).pack(side=tk.RIGHT, padx=2)
+
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill=tk.BOTH, expand=True, padx=8)
+
+        windows_outer, windows_frame = self._section(body, "Terminal windows")
+        windows_outer.pack(fill=tk.X, pady=(0, 8))
+
+        self.window_list = tk.Listbox(
+            windows_frame, exportselection=False, height=6, **listbox_kwargs(self.mode)
+        )
+        self.window_list.pack(fill=tk.X, expand=True, padx=8, pady=(8, 4))
         self.window_list.bind("<<ListboxSelect>>", lambda _e: self._on_select_window())
         self.window_list.bind("<Delete>", lambda _e: self._remove_window())
 
-        win_btns = ttk.Frame(windows_frame)
-        win_btns.pack(fill=tk.X)
-        ttk.Button(win_btns, text="Add window", command=self._add_window).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(win_btns, text="Remove", command=self._remove_window).pack(
-            side=tk.LEFT, padx=2
-        )
+        win_btns = ctk.CTkFrame(windows_frame, fg_color="transparent")
+        win_btns.pack(fill=tk.X, padx=8, pady=(0, 8))
+        self._button(win_btns, "Add window", self._add_window, width=100).pack(side=tk.LEFT, padx=2)
+        self._button(win_btns, "Remove", self._remove_window).pack(side=tk.LEFT, padx=2)
 
-        right = ttk.Frame(body)
+        right = ctk.CTkFrame(body, fg_color="transparent")
         right.pack(fill=tk.BOTH, expand=True)
 
-        form = ttk.LabelFrame(right, text="Selected window", padding=8)
-        form.pack(fill=tk.X)
+        form_outer, form = self._section(right, "Selected window")
+        form_outer.pack(fill=tk.X)
 
-        row = ttk.Frame(form)
-        row.pack(fill=tk.X, pady=2)
-        ttk.Label(row, text="Name", width=12).pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.window_name_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
-        )
+        row = ctk.CTkFrame(form, fg_color="transparent")
+        row.pack(fill=tk.X, padx=8, pady=(8, 2))
+        self._label(row, "Name", width=92).pack(side=tk.LEFT)
+        self._entry(row, self.window_name_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        row = ttk.Frame(form)
-        row.pack(fill=tk.X, pady=2)
-        ttk.Label(row, text="Monitor", width=12).pack(side=tk.LEFT)
-        ttk.Spinbox(row, from_=0, to=3, textvariable=self.monitor_var, width=6).pack(
+        row = ctk.CTkFrame(form, fg_color="transparent")
+        row.pack(fill=tk.X, padx=8, pady=2)
+        self._label(row, "Monitor", width=92).pack(side=tk.LEFT)
+        Spinbox(row, variable=self.monitor_var, from_=0, to=3, mode=self.mode).pack(side=tk.LEFT)
+        self._label(row, "(0 = leftmost)", muted=True).pack(side=tk.LEFT, padx=8)
+
+        row = ctk.CTkFrame(form, fg_color="transparent")
+        row.pack(fill=tk.X, padx=8, pady=2)
+        self._label(row, "Window slot", width=92).pack(side=tk.LEFT)
+        Spinbox(row, variable=self.window_num_var, from_=SLOT_START, to=999, mode=self.mode).pack(
             side=tk.LEFT
         )
-        ttk.Label(row, text="(0 = leftmost)").pack(side=tk.LEFT, padx=6)
+        self._label(row, "keep stable for session resume", muted=True).pack(side=tk.LEFT, padx=8)
 
-        row = ttk.Frame(form)
-        row.pack(fill=tk.X, pady=2)
-        ttk.Label(row, text="Window slot", width=12).pack(side=tk.LEFT)
-        ttk.Spinbox(row, from_=SLOT_START, to=999, textvariable=self.window_num_var, width=6).pack(
-            side=tk.LEFT
-        )
-        ttk.Label(row, text="keep stable for session resume").pack(side=tk.LEFT, padx=6)
-
-        ttk.Button(form, text="Apply window settings", command=self._apply_window_settings).pack(
-            anchor=tk.E, pady=(6, 0)
+        self._button(form, "Apply window settings", self._apply_window_settings, width=150).pack(
+            anchor=tk.E, padx=8, pady=(6, 8)
         )
 
-        tabs_frame = ttk.LabelFrame(right, text="Tabs (repo + agent)", padding=8)
-        tabs_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+        tabs_outer, tabs_frame = self._section(right, "Tabs (repo + agent)")
+        tabs_outer.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
         cols = ("title", "agent", "model", "effort", "context", "path")
         self.tabs_tree = ttk.Treeview(tabs_frame, columns=cols, show="headings", height=10)
@@ -222,80 +400,90 @@ class LayoutUI(tk.Tk):
         self.tabs_tree.column("title", width=90, stretch=False)
         self.tabs_tree.column("agent", width=90, stretch=False)
         self.tabs_tree.column("model", width=110, stretch=False)
-        self.tabs_tree.column("effort", width=60, stretch=False)
-        self.tabs_tree.column("context", width=100, stretch=False)
+        self.tabs_tree.column("effort", width=70, stretch=False)
+        self.tabs_tree.column("context", width=130, stretch=False)
         self.tabs_tree.column("path", width=280)
-        self.tabs_tree.pack(fill=tk.BOTH, expand=True)
+        self.tabs_tree.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
         self.tabs_tree.bind("<Double-1>", lambda _e: self._edit_tab())
         self.tabs_tree.bind("<Delete>", lambda _e: self._remove_tab())
 
-        fields_row = ttk.Frame(tabs_frame)
-        fields_row.pack(fill=tk.X, pady=(8, 0))
+        fields_row = ctk.CTkFrame(tabs_frame, fg_color="transparent")
+        fields_row.pack(fill=tk.X, padx=8, pady=(8, 0))
 
-        ttk.Label(fields_row, text="Repo").pack(side=tk.LEFT)
-        self.repo_combo = ttk.Combobox(
-            fields_row,
-            textvariable=self.repo_var,
-            values=[r["label"] for r in self.repos],
-            state="readonly",
-            width=12,
+        self._label(fields_row, "Repo").pack(side=tk.LEFT)
+        self.repo_combo = self._option(
+            fields_row, self.repo_var, [r["label"] for r in self.repos] or [""], width=110
         )
         self.repo_combo.pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(fields_row, text="Title").pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Entry(fields_row, textvariable=self.tab_title_var, width=12).pack(side=tk.LEFT, padx=4)
+        self._label(fields_row, "Title").pack(side=tk.LEFT, padx=(8, 0))
+        self._entry(fields_row, self.tab_title_var, width=110).pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(fields_row, text="Agent").pack(side=tk.LEFT, padx=(8, 0))
-        self.agent_combo = ttk.Combobox(
+        self._label(fields_row, "Agent").pack(side=tk.LEFT, padx=(8, 0))
+        self.agent_combo = self._option(
             fields_row,
-            textvariable=self.agent_var,
-            values=[a[0] for a in AGENTS],
-            state="readonly",
-            width=12,
+            self.agent_var,
+            [a[0] for a in AGENTS],
+            width=110,
+            command=lambda _v: self._refresh_model_choices(),
         )
         self.agent_combo.pack(side=tk.LEFT, padx=4)
-        self.agent_combo.bind("<<ComboboxSelected>>", lambda _e: self._refresh_model_choices())
 
-        ttk.Label(fields_row, text="Model").pack(side=tk.LEFT, padx=(8, 0))
-        self.model_combo = ttk.Combobox(fields_row, textvariable=self.model_var, width=16)
+        self._label(fields_row, "Model").pack(side=tk.LEFT, padx=(8, 0))
+        self.model_combo = self._combo(fields_row, self.model_var, CLAUDE_MODELS, width=150)
         self.model_combo.pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(fields_row, text="Effort").pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Combobox(
-            fields_row, textvariable=self.effort_var, values=EFFORT_LEVELS, state="readonly", width=8
-        ).pack(side=tk.LEFT, padx=4)
+        self._label(fields_row, "Effort").pack(side=tk.LEFT, padx=(8, 0))
+        self._option(fields_row, self.effort_var, EFFORT_LEVELS, width=90).pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(fields_row, text="Context window").pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Combobox(
-            fields_row, textvariable=self.context_var, values=CONTEXT_WINDOWS, state="readonly", width=8
-        ).pack(side=tk.LEFT, padx=4)
+        self._label(fields_row, "Context window").pack(side=tk.LEFT, padx=(8, 0))
+        self._option(fields_row, self.context_var, CONTEXT_WINDOWS, width=90).pack(side=tk.LEFT, padx=4)
 
-        add_row = ttk.Frame(tabs_frame)
-        add_row.pack(fill=tk.X, pady=(4, 0))
+        add_row = ctk.CTkFrame(tabs_frame, fg_color="transparent")
+        add_row.pack(fill=tk.X, padx=8, pady=(4, 8))
 
-        ttk.Button(add_row, text="Add tab", command=self._add_tab).pack(side=tk.LEFT, padx=4)
-        ttk.Button(add_row, text="Edit tab", command=self._edit_tab).pack(side=tk.LEFT, padx=2)
-        ttk.Button(add_row, text="Remove tab", command=self._remove_tab).pack(side=tk.LEFT)
-        ttk.Button(add_row, text="Move up", command=lambda: self._move_tab(-1)).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(add_row, text="Move down", command=lambda: self._move_tab(1)).pack(
-            side=tk.LEFT
-        )
+        self._button(add_row, "Add tab", self._add_tab).pack(side=tk.LEFT, padx=4)
+        self._button(add_row, "Edit tab", self._edit_tab).pack(side=tk.LEFT, padx=2)
+        self._button(add_row, "Remove tab", self._remove_tab, width=90).pack(side=tk.LEFT)
+        self._button(add_row, "Move up", lambda: self._move_tab(-1)).pack(side=tk.LEFT, padx=4)
+        self._button(add_row, "Move down", lambda: self._move_tab(1)).pack(side=tk.LEFT)
 
-        hint = ttk.Label(
+        hint = ctk.CTkLabel(
             self,
             text="Example: Window1 [PS-1 Pi] [PS-2 Codex] [ORMI-1 Cursor]  ·  "
             "Window2 [ORMI-1 Claude] [ORMI-2 Codex] [ORMI-3 Cursor]",
-            padding=(8, 0, 8, 8),
+            anchor="w",
+            font=FONT_BODY,
+            text_color=resolve_color("dim", self.mode),
         )
-        hint.pack(fill=tk.X)
+        hint.pack(fill=tk.X, padx=8, pady=8)
+
+    # --- modal helpers ---------------------------------------------------
+
+    def _toplevel(self, parent: any, title: str) -> ctk.CTkToplevel:
+        dialog = ctk.CTkToplevel(parent)
+        dialog.title(title)
+        dialog.transient(parent)
+        dialog.configure(fg_color=resolve_color("frame", self.mode))
+
+        def on_mapped() -> None:
+            if not dialog.winfo_exists():
+                return
+            # grab_set() on an unmapped window raises "window not viewable", and
+            # customtkinter's own titlebar tint missed this window for the same reason.
+            dialog.grab_set()
+            apply_titlebar_color(dialog, self.mode)
+
+        dialog.after(200, on_mapped)
+        return dialog
 
     # --- preset CRUD -----------------------------------------------------
 
     def _refresh_preset_list(self) -> None:
         names = sorted(p.stem for p in PRESETS_DIR.glob("*.json"))
-        self.preset_combo["values"] = names
+        current = self.preset_var.get()
+        self.preset_combo.configure(values=names or [""])
+        self.preset_var.set(current)
 
     def _new_preset(self, initial: bool = False) -> None:
         used = collect_used_window_nums()
@@ -413,17 +601,15 @@ class LayoutUI(tk.Tk):
 
     def _refresh_repo_combo(self) -> None:
         labels = [repo["label"] for repo in self.repos]
-        self.repo_combo["values"] = labels
+        self.repo_combo.configure(values=labels or [""])
         if labels and self.repo_var.get() not in labels:
             self.repo_var.set(labels[0])
         elif not labels:
             self.repo_var.set("")
 
     def _manage_repos(self) -> None:
-        dialog = tk.Toplevel(self)
-        dialog.title("Repository catalog")
+        dialog = self._toplevel(self, "Repository catalog")
         dialog.geometry("620x360")
-        dialog.transient(self)
 
         tree = ttk.Treeview(dialog, columns=("label", "path"), show="headings", selectmode="browse")
         tree.heading("label", text="Name")
@@ -441,14 +627,15 @@ class LayoutUI(tk.Tk):
             selection = tree.selection()
             return tree.index(selection[0]) if selection else None
 
-        buttons = ttk.Frame(dialog)
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
         buttons.pack(fill=tk.X, padx=8, pady=(0, 8))
+
         def add() -> None:
             editor = self._edit_repo_dialog(dialog)
             dialog.wait_window(editor)
             refresh()
 
-        ttk.Button(buttons, text="Add", command=add).pack(side=tk.LEFT, padx=2)
+        self._button(buttons, "Add", add).pack(side=tk.LEFT, padx=2)
 
         def edit() -> None:
             index = selected()
@@ -469,34 +656,31 @@ class LayoutUI(tk.Tk):
             self._refresh_repo_combo()
             refresh()
 
-        ttk.Button(buttons, text="Edit", command=edit).pack(side=tk.LEFT, padx=2)
-        ttk.Button(buttons, text="Remove", command=remove).pack(side=tk.LEFT, padx=2)
-        ttk.Button(buttons, text="Close", command=dialog.destroy).pack(side=tk.RIGHT, padx=2)
+        self._button(buttons, "Edit", edit).pack(side=tk.LEFT, padx=2)
+        self._button(buttons, "Remove", remove).pack(side=tk.LEFT, padx=2)
+        self._button(buttons, "Close", dialog.destroy).pack(side=tk.RIGHT, padx=2)
         tree.bind("<Double-1>", lambda _event: edit())
         refresh()
-        dialog.grab_set()
 
-    def _edit_repo_dialog(self, parent: tk.Misc, index: int | None = None) -> tk.Toplevel:
+    def _edit_repo_dialog(self, parent: any, index: int | None = None) -> ctk.CTkToplevel:
         repo = self.repos[index] if index is not None else {"label": "", "path": ""}
-        dialog = tk.Toplevel(parent)
-        dialog.title("Edit repository" if index is not None else "Add repository")
-        dialog.transient(parent)
+        dialog = self._toplevel(parent, "Edit repository" if index is not None else "Add repository")
 
         label_var = tk.StringVar(value=repo["label"])
         path_var = tk.StringVar(value=repo["path"])
-        form = ttk.Frame(dialog, padding=12)
-        form.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(form, text="Name", width=14).grid(row=0, column=0, sticky="w", pady=4)
-        ttk.Entry(form, textvariable=label_var, width=42).grid(row=0, column=1, columnspan=2, sticky="ew", pady=4)
-        ttk.Label(form, text="Working directory", width=14).grid(row=1, column=0, sticky="w", pady=4)
-        ttk.Entry(form, textvariable=path_var, width=42).grid(row=1, column=1, sticky="ew", pady=4)
+        form = ctk.CTkFrame(dialog, fg_color="transparent")
+        form.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+        self._label(form, "Name", width=110).grid(row=0, column=0, sticky="w", pady=4)
+        self._entry(form, label_var, width=300).grid(row=0, column=1, columnspan=2, sticky="ew", pady=4)
+        self._label(form, "Working directory", width=110).grid(row=1, column=0, sticky="w", pady=4)
+        self._entry(form, path_var, width=300).grid(row=1, column=1, sticky="ew", pady=4)
 
         def browse() -> None:
             chosen = filedialog.askdirectory(parent=dialog, initialdir=path_var.get() or str(ROOT))
             if chosen:
                 path_var.set(chosen)
 
-        ttk.Button(form, text="Browse...", command=browse).grid(row=1, column=2, padx=(6, 0))
+        self._button(form, "Browse...", browse).grid(row=1, column=2, padx=(6, 0))
         form.columnconfigure(1, weight=1)
 
         def save() -> None:
@@ -524,11 +708,10 @@ class LayoutUI(tk.Tk):
             self.repo_var.set(label)
             dialog.destroy()
 
-        actions = ttk.Frame(form)
+        actions = ctk.CTkFrame(form, fg_color="transparent")
         actions.grid(row=2, column=0, columnspan=3, sticky="e", pady=(12, 0))
-        ttk.Button(actions, text="Save", command=save).pack(side=tk.LEFT, padx=2)
-        ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=2)
-        dialog.grab_set()
+        self._button(actions, "Save", save).pack(side=tk.LEFT, padx=2)
+        self._button(actions, "Cancel", dialog.destroy).pack(side=tk.LEFT, padx=2)
         dialog.focus_set()
         return dialog
 
@@ -569,9 +752,15 @@ class LayoutUI(tk.Tk):
         if self.current_window_index is None or not self.windows:
             return
         win = self.windows[self.current_window_index]
+        try:
+            monitor = int(self.monitor_var.get())
+            slot = int(self.window_num_var.get())
+        except (tk.TclError, ValueError):
+            messagebox.showerror("Numbers", "Monitor and window slot must be whole numbers.")
+            return
         win["name"] = self.window_name_var.get().strip() or win.get("name", "Terminal")
-        win["targetMonitor"] = int(self.monitor_var.get())
-        win["windowNum"] = int(self.window_num_var.get())
+        win["targetMonitor"] = monitor
+        win["windowNum"] = slot
         self._refresh_window_list()
         if not silent:
             messagebox.showinfo("Updated", "Window settings applied.")
@@ -631,8 +820,9 @@ class LayoutUI(tk.Tk):
 
     def _refresh_model_choices(self) -> None:
         agent_key = AGENT_BY_LABEL.get(self.agent_var.get())
-        self.model_combo["values"] = MODELS_BY_AGENT.get(agent_key, [""])
-        if self.model_var.get() not in self.model_combo["values"]:
+        values = MODELS_BY_AGENT.get(agent_key, [""])
+        self.model_combo.configure(values=values)
+        if self.model_var.get() not in values:
             self.model_var.set(DEFAULT_MODEL_BY_AGENT.get(agent_key, ""))
 
     def _add_tab(self) -> None:
@@ -665,11 +855,9 @@ class LayoutUI(tk.Tk):
             messagebox.showinfo("Edit tab", "Select a tab first.")
             return
         tab = self._current_tabs()[idx]
-        dialog = tk.Toplevel(self)
-        dialog.title("Edit tab")
-        dialog.transient(self)
-        form = ttk.Frame(dialog, padding=12)
-        form.pack(fill=tk.BOTH, expand=True)
+        dialog = self._toplevel(self, "Edit tab")
+        form = ctk.CTkFrame(dialog, fg_color="transparent")
+        form.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
         repo_labels = [repo["label"] for repo in self.repos]
         # Title and working dir are independent - only prefill the repo picker
         # when the path happens to match a catalog entry; don't force one.
@@ -686,44 +874,52 @@ class LayoutUI(tk.Tk):
         )
         effort_var = tk.StringVar(value=tab.get("effort", ""))
         context_var = tk.StringVar(value=tab.get("contextWindow", "") or CONTEXT_WINDOWS[0])
-        ttk.Label(form, text="Title", width=12).grid(row=0, column=0, sticky="w", pady=4)
-        ttk.Entry(form, textvariable=title_var, width=36).grid(row=0, column=1, sticky="ew", pady=4)
 
-        ttk.Label(form, text="Working dir", width=12).grid(row=1, column=0, sticky="w", pady=4)
-        ttk.Label(form, text=tab.get("workingDir", ""), width=36).grid(row=1, column=1, sticky="w", pady=4)
+        self._label(form, "Title", width=110).grid(row=0, column=0, sticky="w", pady=4)
+        self._entry(form, title_var, width=280).grid(row=0, column=1, sticky="ew", pady=4)
 
-        ttk.Label(form, text="Repo (change dir)", width=12).grid(row=2, column=0, sticky="w", pady=4)
-        ttk.Combobox(form, textvariable=repo_var, values=repo_labels, state="readonly", width=34).grid(
+        self._label(form, "Working dir", width=110).grid(row=1, column=0, sticky="w", pady=4)
+        self._label(form, tab.get("workingDir", ""), width=280, muted=True).grid(
+            row=1, column=1, sticky="w", pady=4
+        )
+
+        self._label(form, "Repo (change dir)", width=110).grid(row=2, column=0, sticky="w", pady=4)
+        self._option(form, repo_var, repo_labels or [""], width=280).grid(
             row=2, column=1, sticky="ew", pady=4
         )
-        ttk.Label(form, text="Agent", width=12).grid(row=3, column=0, sticky="w", pady=4)
-        agent_combo = ttk.Combobox(
-            form, textvariable=agent_var, values=[a[0] for a in AGENTS], state="readonly", width=34
+
+        self._label(form, "Agent", width=110).grid(row=3, column=0, sticky="w", pady=4)
+        agent_combo = self._option(
+            form,
+            agent_var,
+            [a[0] for a in AGENTS],
+            width=280,
+            command=lambda _v: refresh_model_values(),
         )
         agent_combo.grid(row=3, column=1, sticky="ew", pady=4)
 
-        ttk.Label(form, text="Model", width=12).grid(row=4, column=0, sticky="w", pady=4)
-        model_combo = ttk.Combobox(form, textvariable=model_var, width=34)
+        self._label(form, "Model", width=110).grid(row=4, column=0, sticky="w", pady=4)
+        model_combo = self._combo(form, model_var, CLAUDE_MODELS, width=280)
         model_combo.grid(row=4, column=1, sticky="ew", pady=4)
 
         def refresh_model_values() -> None:
             agent_key = AGENT_BY_LABEL.get(agent_var.get())
-            model_combo["values"] = MODELS_BY_AGENT.get(agent_key, [""])
-            if model_var.get() not in model_combo["values"]:
+            values = MODELS_BY_AGENT.get(agent_key, [""])
+            model_combo.configure(values=values)
+            if model_var.get() not in values:
                 model_var.set(DEFAULT_MODEL_BY_AGENT.get(agent_key, ""))
 
-        agent_combo.bind("<<ComboboxSelected>>", lambda _e: refresh_model_values())
         refresh_model_values()
 
-        ttk.Label(form, text="Effort", width=12).grid(row=5, column=0, sticky="w", pady=4)
-        ttk.Combobox(form, textvariable=effort_var, values=EFFORT_LEVELS, state="readonly", width=34).grid(
+        self._label(form, "Effort", width=110).grid(row=5, column=0, sticky="w", pady=4)
+        self._option(form, effort_var, EFFORT_LEVELS, width=280).grid(
             row=5, column=1, sticky="ew", pady=4
         )
 
-        ttk.Label(form, text="Context window", width=14).grid(row=6, column=0, sticky="w", pady=4)
-        ttk.Combobox(
-            form, textvariable=context_var, values=CONTEXT_WINDOWS, state="readonly", width=34
-        ).grid(row=6, column=1, sticky="ew", pady=4)
+        self._label(form, "Context window", width=110).grid(row=6, column=0, sticky="w", pady=4)
+        self._option(form, context_var, CONTEXT_WINDOWS, width=280).grid(
+            row=6, column=1, sticky="ew", pady=4
+        )
 
         form.columnconfigure(1, weight=1)
 
@@ -749,11 +945,10 @@ class LayoutUI(tk.Tk):
                 self.tabs_tree.selection_set(children[idx])
             dialog.destroy()
 
-        actions = ttk.Frame(form)
+        actions = ctk.CTkFrame(form, fg_color="transparent")
         actions.grid(row=7, column=0, columnspan=2, sticky="e", pady=(12, 0))
-        ttk.Button(actions, text="Save", command=save).pack(side=tk.LEFT, padx=2)
-        ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=2)
-        dialog.grab_set()
+        self._button(actions, "Save", save).pack(side=tk.LEFT, padx=2)
+        self._button(actions, "Cancel", dialog.destroy).pack(side=tk.LEFT, padx=2)
 
     def _selected_tab_index(self) -> int | None:
         sel = self.tabs_tree.selection()

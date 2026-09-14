@@ -7,13 +7,25 @@ Terminal sessions, layouts, and notifications.
 
 ## Layout composer
 
-Run `LayoutUI.bat` to open the Python/Tkinter layout composer. It creates and
-launches JSON presets with multiple terminal windows, repositories, and agents
-(Claude, Codex, Pi HY4, and Cursor Agent).
+Run `LayoutUI.bat` to open the layout composer. It creates and launches JSON
+presets with multiple terminal windows, repositories, and agents (Claude, Codex,
+Pi HY4, and Cursor Agent). The UI follows the Windows light/dark setting detected
+at launch; the batch file installs `requirements.txt` on first run.
 
 Use **Load** to browse for and open any preset JSON file. The repository catalog
 is managed through **Repos...** and persisted in `repos.json`. Existing tabs can
 be changed with **Edit tab**.
+
+### Standalone executable
+
+`Build-LayoutUI.ps1` produces a single-file `LayoutUI.exe` in the repo root:
+
+```powershell
+.\Build-LayoutUI.ps1                 # add -Clean after changing LayoutUI.spec
+```
+
+The exe reads `custom-layouts\`, `repos.json` and `ps1-scripts\` from its own
+folder, so keep it beside them - none of those are bundled into it.
 
 Launch a layout from PowerShell:
 
@@ -78,6 +90,8 @@ on a particular username or checkout location.
 | Path | Purpose |
 |------|---------|
 | `LayoutUI.bat` / `layout_ui.py` | Layout composer UI |
+| `ui_theme.py` | Brand tokens, OS light/dark resolution |
+| `Build-LayoutUI.ps1` / `LayoutUI.spec` | Single-file exe build |
 | `ps1-scripts/` | Main PowerShell scripts |
 | `ps1-scripts/Invoke-CustomLayout.ps1` | Launches a JSON layout |
 | `ps1-scripts/LayoutEngine.ps1` | Windows Terminal layout engine |

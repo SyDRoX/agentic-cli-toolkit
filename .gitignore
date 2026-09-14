@@ -9,3 +9,7 @@ __pycache__/
 custom-layouts/*.json
 !custom-layouts/Main.json
 !custom-layouts/Mixed Example.json
+
+# PyInstaller build output
+build/
+LayoutUI.exe
