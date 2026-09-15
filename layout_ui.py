@@ -191,6 +191,19 @@ class Spinbox(ctk.CTkFrame):
 
 
 class LayoutUI(ctk.CTk):
+    def report_callback_exception(self, exc: any, val: any, tb: any) -> None:
+        # windowed (pythonw/exe) builds have no stderr - surface Tk callback errors instead of eating them
+        import datetime
+        import traceback
+
+        text = "".join(traceback.format_exception(exc, val, tb))
+        try:
+            with open(ROOT / "layout_ui_error.log", "a", encoding="utf-8") as f:
+                f.write(f"--- {datetime.datetime.now().isoformat()} ---\n{text}\n")
+        except OSError:
+            pass
+        messagebox.showerror("Unhandled error", text, parent=self)
+
     def __init__(self) -> None:
         super().__init__()
         self.mode = detect_os_mode()
@@ -209,20 +222,14 @@ class LayoutUI(ctk.CTk):
         self.monitor_var = tk.IntVar(value=0)
         self.window_num_var = tk.IntVar(value=SLOT_START)
         self.repos = load_repos()
-        self.repo_var = tk.StringVar(value=self.repos[0]["label"] if self.repos else "")
-        self.tab_title_var = tk.StringVar(value="")
-        self.agent_var = tk.StringVar(value=AGENTS[0][0])
-        self.model_var = tk.StringVar(value=DEFAULT_MODEL_BY_AGENT.get(AGENT_BY_LABEL[AGENTS[0][0]], ""))
-        self.effort_var = tk.StringVar(value=DEFAULT_EFFORT)
-        self.context_var = tk.StringVar(value=CONTEXT_WINDOWS[0])
 
         # windows: list[{name, windowNum, targetMonitor, tabs:[{title,workingDir,agent}]}]
         self.windows: list[dict] = []
         self.current_window_index: int | None = None
         self._preset_path: Path | None = None
+        self._cell_editor: any = None
 
         self._build()
-        self._refresh_model_choices()
         self._new_preset(initial=True)
         self._refresh_preset_list()
 
@@ -390,17 +397,17 @@ class LayoutUI(ctk.CTk):
             anchor=tk.E, padx=8, pady=(6, 8)
         )
 
-        tabs_outer, tabs_frame = self._section(right, "Tabs (repo + agent)")
+        tabs_outer, tabs_frame = self._section(right, "Tabs")
         tabs_outer.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
         cols = ("title", "agent", "model", "effort", "context", "path")
         self.tabs_tree = ttk.Treeview(tabs_frame, columns=cols, show="headings", height=10)
-        self.tabs_tree.heading("title", text="Title")
-        self.tabs_tree.heading("agent", text="Agent")
-        self.tabs_tree.heading("model", text="Model")
-        self.tabs_tree.heading("effort", text="Effort")
-        self.tabs_tree.heading("context", text="Context window")
-        self.tabs_tree.heading("path", text="Working dir")
+        self.tabs_tree.heading("title", text="Title", anchor="w")
+        self.tabs_tree.heading("agent", text="Agent", anchor="w")
+        self.tabs_tree.heading("model", text="Model", anchor="w")
+        self.tabs_tree.heading("effort", text="Effort", anchor="w")
+        self.tabs_tree.heading("context", text="Context window", anchor="w")
+        self.tabs_tree.heading("path", text="Working dir", anchor="w")
         self.tabs_tree.column("title", width=90, stretch=False)
         self.tabs_tree.column("agent", width=90, stretch=False)
         self.tabs_tree.column("model", width=110, stretch=False)
@@ -408,47 +415,13 @@ class LayoutUI(ctk.CTk):
         self.tabs_tree.column("context", width=130, stretch=False)
         self.tabs_tree.column("path", width=280)
         self.tabs_tree.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
-        self.tabs_tree.bind("<Double-1>", lambda _e: self._edit_tab())
+        self.tabs_tree.bind("<Double-1>", self._begin_cell_edit)
         self.tabs_tree.bind("<Delete>", lambda _e: self._remove_tab())
 
-        fields_row = ctk.CTkFrame(tabs_frame, fg_color="transparent")
-        fields_row.pack(fill=tk.X, padx=8, pady=(8, 0))
-
-        self._label(fields_row, "Repo").pack(side=tk.LEFT)
-        self.repo_combo = self._option(
-            fields_row, self.repo_var, [r["label"] for r in self.repos] or [""], width=110
-        )
-        self.repo_combo.pack(side=tk.LEFT, padx=4)
-
-        self._label(fields_row, "Title").pack(side=tk.LEFT, padx=(8, 0))
-        self._entry(fields_row, self.tab_title_var, width=110).pack(side=tk.LEFT, padx=4)
-
-        self._label(fields_row, "Agent").pack(side=tk.LEFT, padx=(8, 0))
-        self.agent_combo = self._option(
-            fields_row,
-            self.agent_var,
-            [a[0] for a in AGENTS],
-            width=110,
-            command=lambda _v: self._refresh_model_choices(),
-        )
-        self.agent_combo.pack(side=tk.LEFT, padx=4)
-
-        self._label(fields_row, "Model").pack(side=tk.LEFT, padx=(8, 0))
-        self.model_combo = self._combo(fields_row, self.model_var, CLAUDE_MODELS, width=150)
-        self.model_combo.pack(side=tk.LEFT, padx=4)
-
-        self._label(fields_row, "Effort").pack(side=tk.LEFT, padx=(8, 0))
-        self._option(fields_row, self.effort_var, EFFORT_LEVELS, width=90).pack(side=tk.LEFT, padx=4)
-
-        self._label(fields_row, "Context window").pack(side=tk.LEFT, padx=(8, 0))
-        self.context_combo = self._option(fields_row, self.context_var, CONTEXT_WINDOWS, width=90)
-        self.context_combo.pack(side=tk.LEFT, padx=4)
-
         add_row = ctk.CTkFrame(tabs_frame, fg_color="transparent")
-        add_row.pack(fill=tk.X, padx=8, pady=(4, 8))
+        add_row.pack(fill=tk.X, padx=8, pady=(8, 8))
 
         self._button(add_row, "Add tab", self._add_tab).pack(side=tk.LEFT, padx=4)
-        self._button(add_row, "Edit tab", self._edit_tab).pack(side=tk.LEFT, padx=2)
         self._button(add_row, "Remove tab", self._remove_tab, width=90).pack(side=tk.LEFT)
         self._button(add_row, "Move up", lambda: self._move_tab(-1)).pack(side=tk.LEFT, padx=4)
         self._button(add_row, "Move down", lambda: self._move_tab(1)).pack(side=tk.LEFT)
@@ -604,14 +577,6 @@ class LayoutUI(ctk.CTk):
         except OSError as exc:
             messagebox.showerror("Repo catalog", f"Could not save {REPOS_FILE}: {exc}")
 
-    def _refresh_repo_combo(self) -> None:
-        labels = [repo["label"] for repo in self.repos]
-        self.repo_combo.configure(values=labels or [""])
-        if labels and self.repo_var.get() not in labels:
-            self.repo_var.set(labels[0])
-        elif not labels:
-            self.repo_var.set("")
-
     def _manage_repos(self) -> None:
         dialog = self._toplevel(self, "Repository catalog")
         dialog.geometry("620x360")
@@ -658,7 +623,6 @@ class LayoutUI(ctk.CTk):
                 return
             del self.repos[index]
             self._save_repos()
-            self._refresh_repo_combo()
             refresh()
 
         self._button(buttons, "Edit", edit).pack(side=tk.LEFT, padx=2)
@@ -709,8 +673,6 @@ class LayoutUI(ctk.CTk):
                             tab.update(title=label, workingDir=path)
                 self._refresh_tabs_tree()
             self._save_repos()
-            self._refresh_repo_combo()
-            self.repo_var.set(label)
             dialog.destroy()
 
         actions = ctk.CTkFrame(form, fg_color="transparent")
@@ -807,6 +769,7 @@ class LayoutUI(ctk.CTk):
         return self.windows[self.current_window_index].setdefault("tabs", [])
 
     def _refresh_tabs_tree(self) -> None:
+        self._end_cell_edit()
         self.tabs_tree.delete(*self.tabs_tree.get_children())
         for tab in self._current_tabs():
             self.tabs_tree.insert(
@@ -823,146 +786,142 @@ class LayoutUI(ctk.CTk):
             )
         self._refresh_window_list()
 
-    def _refresh_model_choices(self) -> None:
-        agent_key = AGENT_BY_LABEL.get(self.agent_var.get())
-        values = MODELS_BY_AGENT.get(agent_key, [""])
-        self.model_combo.configure(values=values)
-        if self.model_var.get() not in values:
-            self.model_var.set(DEFAULT_MODEL_BY_AGENT.get(agent_key, ""))
-        contexts = CONTEXT_WINDOWS_BY_AGENT.get(agent_key, [""])
-        self.context_combo.configure(values=contexts)
-        if self.context_var.get() not in contexts:
-            self.context_var.set(DEFAULT_CONTEXT_BY_AGENT.get(agent_key, ""))
-
     def _add_tab(self) -> None:
-        title = self.repo_var.get()
-        repo = next((r for r in self.repos if r["label"] == title), None)
-        if not repo:
-            messagebox.showerror("Repo", "Add or select a repository first.")
+        if not self.repos:
+            messagebox.showerror("Repo", "Add a repository to the catalog first.")
             return
-        agent_label = self.agent_var.get()
-        agent_key = AGENT_BY_LABEL.get(agent_label)
-        if not agent_key:
-            messagebox.showerror("Agent", "Pick a known agent.")
-            return
+        repo = self.repos[0]
+        agent_key = AGENT_BY_LABEL[AGENTS[0][0]]
         self._current_tabs().append(
             {
-                "title": self.tab_title_var.get().strip() or repo["label"],
+                "title": repo["label"],
                 "workingDir": repo["path"],
                 "agent": agent_key,
-                "model": self.model_var.get().strip(),
-                "effort": self.effort_var.get().strip(),
-                "contextWindow": self.context_var.get().strip(),
+                "model": DEFAULT_MODEL_BY_AGENT.get(agent_key, ""),
+                "effort": DEFAULT_EFFORT,
+                "contextWindow": DEFAULT_CONTEXT_BY_AGENT.get(agent_key, ""),
             }
         )
-        self.tab_title_var.set("")
         self._refresh_tabs_tree()
-
-    def _edit_tab(self) -> None:
-        idx = self._selected_tab_index()
-        if idx is None:
-            messagebox.showinfo("Edit tab", "Select a tab first.")
+        children = self.tabs_tree.get_children()
+        if not children:
             return
-        tab = self._current_tabs()[idx]
-        dialog = self._toplevel(self, "Edit tab")
-        form = ctk.CTkFrame(dialog, fg_color="transparent")
-        form.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
-        repo_labels = [repo["label"] for repo in self.repos]
-        # Title and working dir are independent - only prefill the repo picker
-        # when the path happens to match a catalog entry; don't force one.
-        repo_label = next(
-            (repo["label"] for repo in self.repos if repo["path"] == tab.get("workingDir")),
-            "",
-        )
-        title_var = tk.StringVar(value=tab.get("title", ""))
-        repo_var = tk.StringVar(value=repo_label)
-        agent_var = tk.StringVar(value=AGENT_BY_KEY.get(tab.get("agent", ""), AGENTS[0][0]))
-        edit_agent_key = AGENT_BY_LABEL.get(agent_var.get())
-        model_var = tk.StringVar(
-            value=tab.get("model") or DEFAULT_MODEL_BY_AGENT.get(edit_agent_key, "")
-        )
-        effort_var = tk.StringVar(value=tab.get("effort", ""))
-        context_var = tk.StringVar(
-            value=tab.get("contextWindow", "") or DEFAULT_CONTEXT_BY_AGENT.get(edit_agent_key, "")
-        )
+        row_id = children[-1]
+        self.tabs_tree.selection_set(row_id)
+        self.tabs_tree.see(row_id)
+        self._open_cell_editor(row_id, "title")
 
-        self._label(form, "Title", width=110).grid(row=0, column=0, sticky="w", pady=4)
-        self._entry(form, title_var, width=280).grid(row=0, column=1, sticky="ew", pady=4)
+    # --- inline cell editing ---------------------------------------------
 
-        self._label(form, "Working dir", width=110).grid(row=1, column=0, sticky="w", pady=4)
-        self._label(form, tab.get("workingDir", ""), width=280, muted=True).grid(
-            row=1, column=1, sticky="w", pady=4
-        )
+    def _end_cell_edit(self) -> None:
+        editor = self._cell_editor
+        if editor is not None:
+            self._cell_editor = None
+            editor.destroy()
 
-        self._label(form, "Repo (change dir)", width=110).grid(row=2, column=0, sticky="w", pady=4)
-        self._option(form, repo_var, repo_labels or [""], width=280).grid(
-            row=2, column=1, sticky="ew", pady=4
-        )
+    def _begin_cell_edit(self, event: tk.Event) -> None:
+        tree = self.tabs_tree
+        row_id = tree.identify_row(event.y)
+        col_id = tree.identify_column(event.x)
+        if not row_id or not col_id or not col_id.startswith("#"):
+            return
+        columns = tree["columns"]
+        col_index = int(col_id[1:]) - 1
+        if col_index < 0 or col_index >= len(columns):
+            return
+        self._open_cell_editor(row_id, columns[col_index])
 
-        self._label(form, "Agent", width=110).grid(row=3, column=0, sticky="w", pady=4)
-        agent_combo = self._option(
-            form,
-            agent_var,
-            [a[0] for a in AGENTS],
-            width=280,
-            command=lambda _v: refresh_model_values(),
-        )
-        agent_combo.grid(row=3, column=1, sticky="ew", pady=4)
+    def _open_cell_editor(self, row_id: str, col_name: str) -> None:
+        self._end_cell_edit()
+        tree = self.tabs_tree
+        columns = tree["columns"]
+        if col_name not in columns:
+            return
+        tree.update_idletasks()
+        col_id = f"#{columns.index(col_name) + 1}"
+        bbox = tree.bbox(row_id, col_id)
+        if not bbox:
+            return
+        idx = tree.index(row_id)
+        tabs = self._current_tabs()
+        if idx >= len(tabs):
+            return
+        tab = tabs[idx]
+        agent_key = tab.get("agent", "")
+        x, y, w, h = bbox
 
-        self._label(form, "Model", width=110).grid(row=4, column=0, sticky="w", pady=4)
-        model_combo = self._combo(form, model_var, CLAUDE_MODELS, width=280)
-        model_combo.grid(row=4, column=1, sticky="ew", pady=4)
+        def commit(value: str) -> None:
+            self._apply_cell_edit(idx, col_name, value)
+            self._end_cell_edit()
 
-        def refresh_model_values() -> None:
-            agent_key = AGENT_BY_LABEL.get(agent_var.get())
-            values = MODELS_BY_AGENT.get(agent_key, [""])
-            model_combo.configure(values=values)
-            if model_var.get() not in values:
-                model_var.set(DEFAULT_MODEL_BY_AGENT.get(agent_key, ""))
-            contexts = CONTEXT_WINDOWS_BY_AGENT.get(agent_key, [""])
-            context_combo.configure(values=contexts)
-            if context_var.get() not in contexts:
-                context_var.set(DEFAULT_CONTEXT_BY_AGENT.get(agent_key, ""))
-
-        self._label(form, "Effort", width=110).grid(row=5, column=0, sticky="w", pady=4)
-        self._option(form, effort_var, EFFORT_LEVELS, width=280).grid(
-            row=5, column=1, sticky="ew", pady=4
-        )
-
-        self._label(form, "Context window", width=110).grid(row=6, column=0, sticky="w", pady=4)
-        context_combo = self._option(form, context_var, CONTEXT_WINDOWS, width=280)
-        context_combo.grid(row=6, column=1, sticky="ew", pady=4)
-
-        refresh_model_values()
-
-        form.columnconfigure(1, weight=1)
-
-        def save() -> None:
-            title = title_var.get().strip()
-            agent = AGENT_BY_LABEL.get(agent_var.get())
-            if not title or not agent:
-                messagebox.showerror("Tab", "Title and agent are required.", parent=dialog)
-                return
-            repo = next((item for item in self.repos if item["label"] == repo_var.get()), None)
-            working_dir = repo["path"] if repo else tab.get("workingDir", "")
-            tab.update(
-                title=title,
-                workingDir=working_dir,
-                agent=agent,
-                model=model_var.get().strip(),
-                effort=effort_var.get().strip(),
-                contextWindow=context_var.get().strip(),
+        if col_name in ("title", "path"):
+            current = tab.get("title", "") if col_name == "title" else tab.get("workingDir", "")
+            var = tk.StringVar(value=current)
+            widget = self._entry(tree, var, width=w)
+            widget.bind("<Return>", lambda _e: commit(var.get().strip()))
+            widget.bind("<FocusOut>", lambda _e: commit(var.get().strip()))
+            widget.bind("<Escape>", lambda _e: self._end_cell_edit())
+        elif col_name == "agent":
+            var = tk.StringVar(value=AGENT_BY_KEY.get(agent_key, AGENTS[0][0]))
+            widget = self._option(
+                tree,
+                var,
+                [a[0] for a in AGENTS],
+                width=w,
+                command=lambda label: commit(AGENT_BY_LABEL.get(label, agent_key)),
             )
-            self._refresh_tabs_tree()
-            children = self.tabs_tree.get_children()
-            if idx < len(children):
-                self.tabs_tree.selection_set(children[idx])
-            dialog.destroy()
+            widget.bind("<FocusOut>", lambda _e: self._end_cell_edit())
+        elif col_name == "model":
+            values = MODELS_BY_AGENT.get(agent_key, CLAUDE_MODELS)
+            var = tk.StringVar(value=tab.get("model", ""))
+            widget = self._combo(tree, var, values, width=w)
+            widget.bind("<Return>", lambda _e: commit(var.get().strip()))
+            widget.bind("<FocusOut>", lambda _e: commit(var.get().strip()))
+            widget.bind("<Escape>", lambda _e: self._end_cell_edit())
+        elif col_name == "effort":
+            var = tk.StringVar(value=tab.get("effort", ""))
+            widget = self._option(tree, var, EFFORT_LEVELS, width=w, command=commit)
+            widget.bind("<FocusOut>", lambda _e: self._end_cell_edit())
+        elif col_name == "context":
+            values = CONTEXT_WINDOWS_BY_AGENT.get(agent_key, CONTEXT_WINDOWS)
+            var = tk.StringVar(value=tab.get("contextWindow", ""))
+            widget = self._option(tree, var, values, width=w, command=commit)
+            widget.bind("<FocusOut>", lambda _e: self._end_cell_edit())
+        else:
+            return
 
-        actions = ctk.CTkFrame(form, fg_color="transparent")
-        actions.grid(row=7, column=0, columnspan=2, sticky="e", pady=(12, 0))
-        self._button(actions, "Save", save).pack(side=tk.LEFT, padx=2)
-        self._button(actions, "Cancel", dialog.destroy).pack(side=tk.LEFT, padx=2)
+        # CTk multiplies place/size args by the DPI scaling factor; bbox is raw pixels, so pre-divide
+        scaling = ctk.ScalingTracker.get_widget_scaling(self)
+        widget.configure(width=round(w / scaling), height=round(h / scaling))
+        widget.place(x=round(x / scaling), y=round(y / scaling))
+        widget.focus_set()
+        if hasattr(widget, "select_range"):
+            widget.select_range(0, tk.END)
+        self._cell_editor = widget
+
+    def _apply_cell_edit(self, idx: int, col_name: str, value: str) -> None:
+        tabs = self._current_tabs()
+        if idx >= len(tabs):
+            return
+        tab = tabs[idx]
+        if col_name == "agent":
+            if value not in AGENT_BY_KEY:
+                return
+            tab["agent"] = value
+        elif col_name == "context":
+            tab["contextWindow"] = value
+        elif col_name == "path":
+            if value:
+                tab["workingDir"] = value
+        elif col_name == "title":
+            if value:
+                tab["title"] = value
+        else:
+            tab[col_name] = value
+        self._refresh_tabs_tree()
+        children = self.tabs_tree.get_children()
+        if idx < len(children):
+            self.tabs_tree.selection_set(children[idx])
 
     def _selected_tab_index(self) -> int | None:
         sel = self.tabs_tree.selection()
