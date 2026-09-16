@@ -73,17 +73,25 @@ reordering tabs.
 ## Explorer context menu
 
 `LLM_ContextMenu_Toggle.ps1` installs an Explorer menu named **Open LLM CLI
-here**. It opens Anti Gravity, Claude, Codex, Pi HY4, or Agent in the selected
-folder, with toggles for a new Terminal window or appending to the existing
-window:
+here**. It opens the configured CLI in the selected folder, with toggles for a
+new/existing Terminal window and a standard/administrator Terminal:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\ps1-scripts\LLM_ContextMenu_Toggle.ps1 -Mode New
-powershell -ExecutionPolicy Bypass -File .\ps1-scripts\LLM_ContextMenu_Toggle.ps1 -Mode Append
+powershell -ExecutionPolicy Bypass -File .\ps1-scripts\LLM_ContextMenu_Toggle.ps1 -Mode Append -Elevation Admin
 ```
 
-The script stores its own resolved path in the registry, so it does not depend
-on a particular username or checkout location.
+Edit `ps1-scripts/LLM_ContextMenu.config.yaml` to add, remove, rename, or
+reorder CLI commands. The same file controls whether the terminal-mode and
+elevation toggles are shown and supplies their initial defaults. Re-run the
+script after editing it; removed entries are also removed from Explorer.
+Pass `-ConfigPath` to use a YAML file elsewhere; that path is preserved by the
+installed toggle commands.
+
+The script stores its own resolved path and the YAML path in the registry, so
+it does not depend on a particular username or checkout location. Selecting
+the administrator option causes Windows to show a UAC prompt when a CLI is
+opened.
 
 ## Repository contents
 
@@ -99,6 +107,7 @@ on a particular username or checkout location.
 | `launchers/` | Per-agent tab launchers |
 | `agentic-cli-notify/` | Bundled multi-agent notification component |
 | `ps1-scripts/LLM_ContextMenu_Toggle.ps1` | Explorer integration |
+| `ps1-scripts/LLM_ContextMenu.config.yaml` | Explorer menu CLI options and defaults |
 | `custom-layouts/` | Example layout presets |
 | `repos.json` | Editable repository catalog |
 

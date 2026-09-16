@@ -1,0 +1,23 @@
+# Re-run LLM_ContextMenu_Toggle.ps1 after editing this file.
+menu:
+  title: 'Open LLM CLI here'
+
+# Entries are displayed in this order. IDs must be unique and may contain only
+# letters, numbers, underscores, and hyphens.
+models:
+  - id: Claude
+    label: 'Claude'
+    command: 'claude --dangerously-skip-permissions'
+  - id: Codex
+    label: 'Codex'
+    command: 'codex --dangerously-bypass-approvals-and-sandbox'
+
+# Set either value to false to hide that pair of choices from the menu.
+toggles:
+  terminalMode: true
+  elevation: true
+
+# Used on a normal script run when -Mode and/or -Elevation are omitted.
+defaults:
+  terminalMode: New
+  elevation: Standard
