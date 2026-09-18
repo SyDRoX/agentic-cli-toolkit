@@ -19,7 +19,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Python = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+    [string]$Python = "python",
     [switch]$Clean
 )
 
@@ -33,10 +33,7 @@ if (-not $resolved) {
 $pythonExe = $resolved.Source
 Write-Host "Building with $pythonExe" -ForegroundColor Cyan
 
-$prevEap = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
 & $pythonExe -c "import customtkinter, PyInstaller" 2>$null
-$ErrorActionPreference = $prevEap
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing build dependencies..." -ForegroundColor Yellow
     & $pythonExe -m pip install -r (Join-Path $repoRoot "requirements.txt") -r (Join-Path $repoRoot "requirements-build.txt")

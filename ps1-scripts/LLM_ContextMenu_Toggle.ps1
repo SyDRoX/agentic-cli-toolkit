@@ -68,7 +68,7 @@ function Import-LLMMenuConfig {
             [pscustomobject]@{ Id = "AntiGravity"; Label = "Anti Gravity"; Command = "agy --dangerously-skip-permissions" }
             [pscustomobject]@{ Id = "Claude"; Label = "Claude"; Command = "claude --dangerously-skip-permissions" }
             [pscustomobject]@{ Id = "Codex"; Label = "Codex"; Command = "codex --dangerously-bypass-approvals-and-sandbox" }
-            [pscustomobject]@{ Id = "PiHy4"; Label = "Pi HY4[256K]"; Command = "pi --model openrouter/tencent/hy4-preview" }
+            [pscustomobject]@{ Id = "PiGpt56Luna"; Label = "Pi - GPT 5.6 Luna (medium, 256K)"; Command = "pi --model gpt-5.6-luna:medium" }
             [pscustomobject]@{ Id = "Agent"; Label = "Agent"; Command = "agent -f" }
         )
         Toggles = [ordered]@{ TerminalMode = $true; Elevation = $true }

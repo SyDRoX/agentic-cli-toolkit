@@ -11,6 +11,9 @@ models:
   - id: Codex
     label: 'Codex'
     command: 'codex --dangerously-bypass-approvals-and-sandbox'
+  - id: PiGpt56Luna
+    label: 'Pi - GPT 5.6 Luna (medium, 256K)'
+    command: 'pi --model gpt-5.6-luna:medium'
 
 # Set either value to false to hide that pair of choices from the menu.
 toggles:
