@@ -20,6 +20,10 @@ $extraArgs = @()
 if ($Model)  { $extraArgs += @("-c", "model=$Model") }
 if ($Effort) { $extraArgs += @("-c", "model_reasoning_effort=$Effort") }
 
+# GPT-backed Codex models are launched in YOLO mode. Keep other providers on
+# their normal approval/sandbox settings.
+if ($Model -match '^gpt') { $extraArgs += "--dangerously-bypass-approvals-and-sandbox" }
+
 # Stock window is 272k; MAX only pays off on models whose max_context_window is 872k.
 switch ($ContextWindow) {
     "0.25m" { $extraArgs += @("-c", "model_context_window=250000") }
