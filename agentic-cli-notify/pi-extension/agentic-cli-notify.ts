@@ -58,6 +58,13 @@ function notify(action: "attention" | "resume"): void {
 }
 
 export default function (pi: any) {
+  // Capture the current Windows Terminal tab as soon as pi starts. Without
+  // this, the first notification can be dropped because no per-session HWND
+  // file exists until the first prompt is submitted.
+  pi.on("session_start", async () => {
+    notify("resume");
+  });
+
   pi.on("before_agent_start", async () => {
     notify("resume");
   });
