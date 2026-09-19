@@ -8,7 +8,7 @@ $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $wpf = Join-Path (Split-Path $compiler) 'WPF'
 if (-not (Test-Path -LiteralPath $compiler)) { throw ".NET Framework compiler not found: $compiler" }
 $null = New-Item -ItemType Directory -Path $InstallDir -Force
-foreach ($file in @('notify.ps1', 'popup.ps1', 'codex-hook.ps1', 'attention.cmd', 'resume.cmd', 'setup.sh', 'SaveHwnd.cs')) {
+foreach ($file in @('notify.ps1', 'popup.ps1', 'codex-hook.ps1', 'attention.cmd', 'resume.cmd', 'setup.ps1', 'SaveHwnd.cs')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $InstallDir -Force
 }
 & $compiler -nologo -optimize+ "-out:$InstallDir\save-hwnd.exe" "$InstallDir\SaveHwnd.cs" `
@@ -18,4 +18,4 @@ if ($LASTEXITCODE -ne 0) { throw 'save-hwnd.exe compilation failed.' }
 Write-Host 'Installed. In Codex, use /hooks to review and trust the two notification hooks.'
 Write-Host 'If hooks are disabled, enable hooks = true under [features] in config.toml.'
 Write-Host 'From each focused Windows Terminal tab, run:'
-Write-Host '  bash ~/.claude/hooks/agentic-cli-notify/setup.sh'
+Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\setup.ps1`""

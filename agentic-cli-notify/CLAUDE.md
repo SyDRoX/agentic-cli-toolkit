@@ -7,10 +7,16 @@ Desktop notification system for Claude Code on Windows Terminal.
 Hooks (cmd.exe) -> notify.ps1 (PowerShell) -> popup.ps1 (WPF)
 
 - `attention.cmd` / `resume.cmd` are thin cmd.exe wrappers required because Claude Code hooks run via cmd.exe on Windows
+- Every agent maps onto the same two actions (`attention`, `resume`) through its own adapter:
+  - Claude Code: `attention.cmd` / `resume.cmd` from `~/.claude/settings.json`
+  - Codex: `codex-hook.ps1` from `$CODEX_HOME/hooks.json` (event read from the stdin payload)
+  - Cursor Agent: `cursor-hook.ps1` from `~/.cursor/hooks.json`, events `stop` and `beforeSubmitPrompt`; the event is passed as `-Action` because the payload field name differs between Cursor versions
+  - pi: `pi-extension/agentic-cli-notify.ts`, installed to `~/.pi/agent/extensions/`, on `agent_settled` / `ui_prompt_start` / `before_agent_start`
+- `notify.ps1 -Agent` accepts `Claude`, `Codex`, `Pi`, `Cursor`; the value is only a popup title
 - `notify.ps1` is the dispatcher: flashes the taskbar, launches/kills popup processes
 - `popup.ps1` is a standalone WPF window launched as a separate PowerShell process with `-STA` flag
 - `save-hwnd.exe` is a .NET Framework 4 console app compiled from `SaveHwnd.cs`
-- `setup.sh` is the user-facing setup script that runs `save-hwnd.exe` and stores results per-session
+- `setup.ps1` is the user-facing setup script that runs `save-hwnd.exe` and stores results per-session
 
 ## Key Constraints
 
@@ -30,6 +36,7 @@ All runtime state is in `~/.claude/hooks/agentic-cli-notify/`, keyed by `WT_SESS
 - `.hwnd-{session}` - Window handle
 - `.tabindex-{session}` - Tab position (1-based)
 - `.popup-{session}.pid` - Active popup PID
+- `.slots/{screen}-{pid}.slot` - Stack slot claim per live popup, holding `<claimTicks>|<height>`. Popups stack by claim order and reflow down when a lower popup closes; claims of dead processes are purged on the next poll.
 
 ## Building
 

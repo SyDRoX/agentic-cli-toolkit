@@ -1,6 +1,6 @@
 # agentic-cli-notify
 
-Desktop notifications for Claude Code and Codex CLI on Windows Terminal.
+Desktop notifications for Claude Code, Codex CLI, Cursor Agent CLI and pi on Windows Terminal.
 
 When your assistant finishes a task and needs your input, you get:
 
@@ -21,6 +21,15 @@ Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) trigge
 | `Stop` | Claude finishes and waits for input | Flash taskbar + show popup |
 | `UserPromptSubmit` | You send a message | Stop flash + dismiss popup |
 
+Every supported agent maps its own lifecycle events onto the same two actions:
+
+| Agent | Attention event | Resume event | Mechanism |
+|-------|-----------------|--------------|-----------|
+| Claude Code | `Stop` | `UserPromptSubmit` | `~/.claude/settings.json` hooks |
+| Codex | `Stop` | `UserPromptSubmit` | `$CODEX_HOME/hooks.json` -> `codex-hook.ps1` |
+| Cursor Agent | `stop` | `beforeSubmitPrompt` | `~/.cursor/hooks.json` -> `cursor-hook.ps1` |
+| pi | `agent_settled`, `ui_prompt_start` | `before_agent_start` | `~/.pi/agent/extensions/agentic-cli-notify.ts` |
+
 Each session is isolated by its `WT_SESSION` environment variable, so notifications always target the correct window and tab.
 
 ```
@@ -28,13 +37,15 @@ Stop hook -> attention.cmd -> notify.ps1 attention -> FlashWindowEx + WPF popup
 UserPromptSubmit hook -> resume.cmd -> notify.ps1 resume -> StopFlash + kill popup
 ```
 
-When multiple sessions need attention simultaneously, popups stack vertically instead of overlapping.
+When multiple sessions need attention simultaneously, popups stack vertically instead of
+overlapping. Each live popup claims a slot in `.slots/`, so a popup that closes frees its
+place and the popups above it slide down into the gap.
 
 ## Requirements
 
 - Windows 10/11
 - [Windows Terminal](https://github.com/microsoft/terminal)
-- Claude Code CLI or Codex CLI with lifecycle hook support
+- One of: Claude Code CLI, Codex CLI, Cursor Agent CLI (hook support), or pi (extension support)
 - PowerShell 5.1 (included with Windows)
 - .NET Framework 4 (included with Windows, needed to compile `save-hwnd.exe`)
 
@@ -64,7 +75,7 @@ Then configure each tab **while that tab and its Windows Terminal window are
 focused** (Git Bash is required for this setup command):
 
 ```powershell
-& 'C:\Program Files\Git\bin\bash.exe' "$env:USERPROFILE/.claude/hooks/agentic-cli-notify/setup.sh"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\hooks\agentic-cli-notify\setup.ps1"
 ```
 
 The popup says **Codex**, flashes the saved terminal window, and uses the same
@@ -87,14 +98,42 @@ temporary state and invisible test windows; it does not change live tab mappings
 To uninstall Codex integration, remove only the `codex-hook.ps1` handlers from
 `hooks.json`. Keep the shared scripts if Claude Code still uses them.
 
+### Cursor Agent CLI
+
+After the shared scripts are installed (`install.ps1` does this and registers
+every agent CLI it finds), register the Cursor hooks explicitly with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\register-cursor-hooks.ps1
+```
+
+This adds `stop` and `beforeSubmitPrompt` entries to `~/.cursor/hooks.json`, preserving
+existing hooks and backing up the previous file. The popup says **Cursor**. The event is
+passed to `cursor-hook.ps1` as an argument, so the payload field naming differences
+between Cursor versions do not matter. To uninstall, remove only the `cursor-hook.ps1`
+entries from `hooks.json`.
+
+### pi
+
+pi has no external hook config, so the integration ships as an extension:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\register-pi-extension.ps1
+```
+
+This copies `pi-extension/agentic-cli-notify.ts` to `~/.pi/agent/extensions/`, where pi
+auto-discovers it. Restart pi to load it. The popup says **Pi**. It also fires on
+`ui_prompt_start`, so a pending confirm/select dialog raises a notification too. To
+uninstall, delete `~/.pi/agent/extensions/agentic-cli-notify.ts`.
+
 ### Claude Code (when used standalone)
 
 ### 1. Clone and install
 
-```bash
+```powershell
 git clone https://github.com/SyDRoX/dev-layout.git
-cd dev-layout/agentic-cli-notify
-bash install.sh
+cd dev-layoutgentic-cli-notify
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 This copies scripts to `~/.claude/hooks/agentic-cli-notify/` and compiles `save-hwnd.exe`.
@@ -140,13 +179,13 @@ Replace `YOUR_USERNAME` with your Windows username.
 
 For **every** Claude Code tab, while focused on the correct Windows Terminal window:
 
-```bash
-bash ~/.claude/hooks/agentic-cli-notify/setup.sh
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\hooksgentic-cli-notify\setup.ps1"
 ```
 
 This captures the window handle (HWND) and tab position so notifications can target the right window and switch to the right tab.
 
-**Re-run setup.sh after:** WT restart, tab reorder, or adding/removing tabs.
+**Re-run setup.ps1 after:** WT restart, tab reorder, or adding/removing tabs.
 
 ## File Structure
 
@@ -158,10 +197,11 @@ agentic-cli-notify/
     notify.ps1       # Main logic: flash window, launch/kill popup
     popup.ps1        # WPF popup: dark theme, click-to-switch, stacking
     codex-hook.ps1   # Codex lifecycle hook adapter
+    cursor-hook.ps1  # Cursor Agent lifecycle hook adapter
   SaveHwnd.cs        # C# source: captures foreground HWND + tab index
   save-hwnd.exe      # Compiled from SaveHwnd.cs (not in git, built by install)
-  setup.sh           # Per-tab setup: captures window handle + tab position
-  install.sh         # Full installer (copy + compile + instructions)
+  setup.ps1          # Per-tab setup: captures window handle + tab position
+  install.ps1        # Full installer (copy + compile + instructions)
   build.cmd          # Compile save-hwnd.exe from SaveHwnd.cs
 ```
 
@@ -170,7 +210,8 @@ agentic-cli-notify/
 ```
 .hwnd-{WT_SESSION}          # Saved window handle for this session
 .tabindex-{WT_SESSION}      # Saved tab index (1-based) for this session
-.popup-{WT_SESSION}.pid     # Active popup PID (for stacking + cleanup)
+.popup-{WT_SESSION}.pid     # Active popup PID (for cleanup)
+.slots/{screen}-{pid}.slot  # Stack slot claim: "<claimTicks>|<height>"
 ```
 
 ## Technical Details
@@ -184,7 +225,7 @@ Windows Terminal uses ConPTY, which means:
 - `GetForegroundWindow()` is unreliable from hook subprocesses (timing issues)
 - Tab names change dynamically, so name-based matching is fragile
 
-The only reliable approach is capturing the window handle while the user is focused on the correct window (`setup.sh` does this via `save-hwnd.exe`).
+The only reliable approach is capturing the window handle while the user is focused on the correct window (`setup.ps1` does this via `save-hwnd.exe`).
 
 ### Window focusing
 
@@ -202,16 +243,16 @@ Each Claude Code tab has a unique `WT_SESSION` environment variable (inherited b
 ## Troubleshooting
 
 **No popup appears:**
-- Run `setup.sh` again from the affected tab
+- Run `setup.ps1` again from the affected tab
 - Check that hooks are registered in `~/.claude/settings.json`
 - Verify `save-hwnd.exe` exists in `~/.claude/hooks/agentic-cli-notify/`
 
 **Popup appears but wrong window focuses:**
-- Re-run `setup.sh` from the correct tab while focused on the correct WT window
-- If you rearranged tabs since setup, run `setup.sh` again
+- Re-run `setup.ps1` from the correct tab while focused on the correct WT window
+- If you rearranged tabs since setup, run `setup.ps1` again
 
 **Popup appears but wrong tab activates:**
-- Tab index is position-based (1-9). Re-run `setup.sh` after any tab reorder.
+- Tab index is position-based (1-9). Re-run `setup.ps1` after any tab reorder.
 
 **Crash log:**
 - Check `~/.claude/hooks/agentic-cli-notify/popup-crash.log`

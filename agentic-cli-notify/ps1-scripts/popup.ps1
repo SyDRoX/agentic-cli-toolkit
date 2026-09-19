@@ -1,7 +1,7 @@
 param(
     [string]$SessionId = "default",
     [int]$ScreenIndex = 0,
-    [ValidateSet('Claude', 'Codex')]
+    [ValidateSet('Claude', 'Codex', 'Pi', 'Cursor')]
     [string]$Agent = 'Claude'
 )
 
@@ -108,25 +108,85 @@ if (Test-Path $labelFile) {
     if ($label) { $label = $label.Trim() }
 }
 
-# Count active popups to determine stack position
-$activePopups = 0
-Get-ChildItem "$stateDir\.popup-*.pid" -ErrorAction SilentlyContinue | ForEach-Object {
-    $lines = Get-Content $_.FullName -ErrorAction SilentlyContinue
-    if ($lines) {
-        foreach ($pidLine in $lines) {
-            if ($pidLine.Trim()) {
-                $proc = Get-Process -Id $pidLine.Trim() -ErrorAction SilentlyContinue
-                if ($proc -and -not $proc.HasExited) { $activePopups++ }
-            }
-        }
-    }
-}
-$screenCount = ([System.Windows.Forms.Screen]::AllScreens).Count
-if ($screenCount -gt 1) { $activePopups = [math]::Floor($activePopups / $screenCount) }
+$popupGap = 8
+$popupMargin = 20
+$defaultHeight = 100
 
-$popupHeight = 100
 $pidFile = "$stateDir\.popup-$SessionId.pid"
 $dismissFile = "$stateDir\.dismiss-$SessionId"
+$logFile = "$stateDir\popup-debug.log"
+
+function Write-PopupLog {
+    param([string]$Msg)
+    try {
+        $ts = Get-Date -Format "HH:mm:ss.fff"
+        Add-Content -Path $logFile -Value "[$ts] PID=$PID Screen=$ScreenIndex Session=$SessionId $Msg"
+    } catch {}
+}
+
+# Stack registry.
+#
+# Every live popup owns one claim file "<screen>-<pid>.slot" holding
+# "<claimTicks>|<height>". Position within a screen is claim order, not a
+# count of popups, so a popup that closes frees its place and the popups
+# above it slide down into the gap instead of drifting upward forever.
+$slotDir = "$stateDir\.slots"
+if (-not (Test-Path $slotDir)) {
+    $null = New-Item -ItemType Directory -Path $slotDir -Force -ErrorAction SilentlyContinue
+}
+$claimFile = "$slotDir\$ScreenIndex-$PID.slot"
+$script:claimTicks = [DateTime]::UtcNow.Ticks
+$script:ownHeight = $defaultHeight
+Set-Content -Path $claimFile -Value "$($script:claimTicks)|$defaultHeight" -ErrorAction SilentlyContinue
+
+function Test-PopupAlive {
+    param([int]$ProcessId)
+    if ($ProcessId -le 0) { return $false }
+    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if (-not $proc) { return $false }
+    return ($proc.ProcessName -like 'powershell*' -or $proc.ProcessName -like 'pwsh*')
+}
+
+# Height taken up by the live popups claimed before this one on this screen.
+# Claims of dead processes are deleted here, which is what collapses the stack.
+function Get-StackOffset {
+    $below = 0
+    try {
+        $claims = New-Object System.Collections.ArrayList
+        $files = @(Get-ChildItem "$slotDir\$ScreenIndex-*.slot" -ErrorAction SilentlyContinue)
+        foreach ($f in $files) {
+            $parts = $f.BaseName -split '-'
+            if ($parts.Count -lt 2) { continue }
+            $claimPid = 0
+            [int]::TryParse($parts[$parts.Count - 1], [ref]$claimPid) | Out-Null
+            if ($claimPid -eq $PID) {
+                $null = $claims.Add([pscustomobject]@{ ClaimPid = $PID; Ticks = $script:claimTicks; Height = [double]$script:ownHeight })
+                continue
+            }
+            if (-not (Test-PopupAlive $claimPid)) {
+                Remove-Item $f.FullName -Force -ErrorAction SilentlyContinue
+                continue
+            }
+            $raw = (Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue)
+            if (-not $raw) { continue }
+            $fields = $raw.Trim() -split '\|'
+            if ($fields.Count -lt 2) { continue }
+            $null = $claims.Add([pscustomobject]@{ ClaimPid = $claimPid; Ticks = [long]$fields[0]; Height = [double]$fields[1] })
+        }
+        foreach ($c in @($claims | Sort-Object Ticks, ClaimPid)) {
+            if ($c.ClaimPid -eq $PID) { break }
+            $below += $c.Height + $popupGap
+        }
+    } catch {}
+    return $below
+}
+
+# Top edge this popup should sit at right now.
+function Get-TargetTop {
+    $top = $wa.Bottom - 10 - $script:ownHeight - (Get-StackOffset)
+    if ($top -lt $wa.Top) { $top = $wa.Top }
+    return $top
+}
 
 # Get target screen
 $screens = [System.Windows.Forms.Screen]::AllScreens
@@ -145,12 +205,10 @@ $window.SizeToContent = "Height"
 $window.Width = 350
 $window.WindowStartupLocation = "Manual"
 
-# Position: bottom-right of screen, clamped within working area
+# Position: bottom-right of screen, stacked above the popups already open
 $popupWidth = 350
-$margin = 20
-$window.Left = [Math]::Max($wa.Right - $popupWidth - $margin, $wa.Left)
-$baseTop = [Math]::Max($wa.Bottom - $popupHeight - 10, $wa.Top)
-$window.Top = [Math]::Max($baseTop - ($activePopups * $popupHeight), $wa.Top)
+$window.Left = [Math]::Max($wa.Right - $popupWidth - $popupMargin, $wa.Left)
+$window.Top = Get-TargetTop
 
 $border = New-Object System.Windows.Controls.Border
 $border.CornerRadius = [System.Windows.CornerRadius]::new(8)
@@ -252,28 +310,49 @@ $dismissTimer.Add_Tick({
 })
 $dismissTimer.Start()
 
-# Slide-in animation
-$animTarget = $baseTop - ($activePopups * $popupHeight)
-$animFrom = $wa.Bottom
-$window.Add_Loaded({
+# Animated moves. Top stays under animation control, so the intended
+# position is tracked separately instead of read back from the window.
+$script:currentTop = $window.Top
+
+function Move-PopupTo {
+    param([double]$NewTop, [int]$DurationMs)
     $animation = New-Object System.Windows.Media.Animation.DoubleAnimation
-    $animation.From = $animFrom
-    $animation.To = $animTarget
-    $animation.Duration = [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(300))
+    $animation.From = $script:currentTop
+    $animation.To = $NewTop
+    $animation.Duration = [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds($DurationMs))
     $animation.EasingFunction = New-Object System.Windows.Media.Animation.QuadraticEase
+    $script:currentTop = $NewTop
     $window.BeginAnimation([System.Windows.Window]::TopProperty, $animation)
+}
+
+# Slide-in animation. The real height is only known once the window is laid
+# out, so publish it to the claim file before taking a place in the stack.
+$window.Add_Loaded({
+    if ($window.ActualHeight -gt 0) { $script:ownHeight = $window.ActualHeight }
+    Set-Content -Path $claimFile -Value "$($script:claimTicks)|$($script:ownHeight)" -ErrorAction SilentlyContinue
+    $script:currentTop = $wa.Bottom
+    Move-PopupTo (Get-TargetTop) 300
+})
+
+# Reflow: when a popup below this one closes, slide down into the freed space.
+$reflowTimer = New-Object System.Windows.Threading.DispatcherTimer
+$reflowTimer.Interval = [TimeSpan]::FromMilliseconds(400)
+$reflowTimer.Add_Tick({
+    $target = Get-TargetTop
+    if ([Math]::Abs($target - $script:currentTop) -ge 1) {
+        Move-PopupTo $target 200
+    }
+})
+$reflowTimer.Start()
+
+# Give up the slot as soon as this popup goes away.
+$window.Add_Closed({
+    try { $reflowTimer.Stop() } catch {}
+    Remove-Item $claimFile -Force -ErrorAction SilentlyContinue
 })
 
 # Append PID to session pid file
 Add-Content -Path $pidFile -Value $PID
-
-$logFile = "$stateDir\popup-debug.log"
-
-function Write-PopupLog {
-    param([string]$Msg)
-    $ts = Get-Date -Format "HH:mm:ss.fff"
-    Add-Content -Path $logFile -Value "[$ts] PID=$PID Screen=$ScreenIndex Session=$SessionId $Msg"
-}
 
 # Clean dismiss file from previous run if stale
 Remove-Item $dismissFile -Force -ErrorAction SilentlyContinue
@@ -285,4 +364,5 @@ try {
 } catch {
     $_ | Out-File "$stateDir\popup-crash.log"
 }
+Remove-Item $claimFile -Force -ErrorAction SilentlyContinue
 Write-PopupLog "EXITED"

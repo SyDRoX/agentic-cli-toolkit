@@ -1,7 +1,7 @@
 param(
     [Parameter(Position=0)]
     [string]$Action = "attention",
-    [ValidateSet('Claude', 'Codex')]
+    [ValidateSet('Claude', 'Codex', 'Pi', 'Cursor')]
     [string]$Agent = 'Claude'
 )
 
@@ -15,6 +15,7 @@ $cooldownFile = "$stateDir\.cooldown-$sessionId"
 $hwndFile = "$stateDir\.hwnd-$sessionId"
 $tabIndexFile = "$stateDir\.tabindex-$sessionId"
 $popupScript = "$stateDir\popup.ps1"
+$slotDir = "$stateDir\.slots"
 
 Add-Type -TypeDefinition @"
 using System;
@@ -98,7 +99,13 @@ try {
                 $oldPids = Get-Content $pidFile -ErrorAction SilentlyContinue
                 if ($oldPids) {
                     foreach ($p in $oldPids) {
-                        if ($p.Trim()) { Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue }
+                        if ($p.Trim()) {
+                            Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue
+                            # A killed popup cannot release its own stack slot,
+                            # so drop the claim here or the stack keeps a hole.
+                            Get-ChildItem "$slotDir\*-$($p.Trim()).slot" -ErrorAction SilentlyContinue |
+                                Remove-Item -Force -ErrorAction SilentlyContinue
+                        }
                     }
                 }
                 Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
@@ -161,7 +168,13 @@ try {
                 $oldPids = Get-Content $pidFile -ErrorAction SilentlyContinue
                 if ($oldPids) {
                     foreach ($p in $oldPids) {
-                        if ($p.Trim()) { Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue }
+                        if ($p.Trim()) {
+                            Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue
+                            # A killed popup cannot release its own stack slot,
+                            # so drop the claim here or the stack keeps a hole.
+                            Get-ChildItem "$slotDir\*-$($p.Trim()).slot" -ErrorAction SilentlyContinue |
+                                Remove-Item -Force -ErrorAction SilentlyContinue
+                        }
                     }
                 }
                 Remove-Item $pidFile -Force -ErrorAction SilentlyContinue

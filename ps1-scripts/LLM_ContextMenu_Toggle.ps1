@@ -260,14 +260,12 @@ function New-RadioMarkerIcon {
 }
 
 # Run notification setup inside the new tab so it inherits that tab's WT_SESSION.
-# Use Git Bash explicitly: bash.exe on PATH may be the WSL launcher.
 $setupSnippet = @'
-$notifySetup = Join-Path $env:USERPROFILE '.claude\hooks\agentic-cli-notify\setup.sh'
-$gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
-if ((Test-Path -LiteralPath $notifySetup) -and (Test-Path -LiteralPath $gitBash)) {
-    & $gitBash $notifySetup
+$notifySetup = Join-Path $env:USERPROFILE '.claude\hooks\agentic-cli-notify\setup.ps1'
+if (Test-Path -LiteralPath $notifySetup) {
+    & $notifySetup
 } else {
-    Write-Warning 'Notification setup skipped: install agentic-cli-notify and Git for Windows.'
+    Write-Warning 'Notification setup skipped: install agentic-cli-notify first.'
 }
 '@
 

@@ -60,13 +60,13 @@ Install Claude/Codex notification hooks from this checkout:
 
 ```powershell
 # Claude Code notification files and hook registration guidance
-& 'C:\Program Files\Git\bin\bash.exe' .\agentic-cli-notify\install.sh
+powershell -NoProfile -ExecutionPolicy Bypass -File .\agentic-cli-notify\install.ps1
 
 # Codex hook installation and registration
 powershell -ExecutionPolicy Bypass -File .\agentic-cli-notify\ps1-scripts\install-codex.ps1
 ```
 
-Run `bash ~/.claude/hooks/agentic-cli-notify/setup.sh` from each focused
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\hooksgentic-cli-notify\setup.ps1"` from each focused
 Windows Terminal tab after installation. Re-run it after restarting Terminal or
 reordering tabs.
 

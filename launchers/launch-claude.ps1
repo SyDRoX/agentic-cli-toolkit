@@ -39,7 +39,7 @@ if (-not (Test-Path $StateDir)) {
 # Upstream calls this unconditionally and assumes ~/.claude/hooks/agentic-cli-notify
 # exists. It does not ship with dev-layout, so guard it: when absent, skip it
 # entirely instead of erroring and burning 15s polling for an HWND nobody reads.
-$notifySetup = Join-Path $env:USERPROFILE ".claude\hooks\agentic-cli-notify\setup.sh"
+$notifySetup = Join-Path $env:USERPROFILE ".claude\hooks\agentic-cli-notify\setup.ps1"
 if (Test-Path $notifySetup) {
     $hwnd = $null
     $hwndFile = Join-Path $StateDir ".devlayout-hwnd-$windowNum"
@@ -51,13 +51,10 @@ if (Test-Path $notifySetup) {
         }
         Start-Sleep -Milliseconds 500
     }
-    $bashExe = "C:\Program Files\Git\usr\bin\bash.exe"
-    if (Test-Path $bashExe) {
-        if ($tabIndex -and $label -and $hwnd) {
-            & $bashExe $notifySetup $tabIndex $label $hwnd
-        } elseif ($tabIndex -and $label) {
-            & $bashExe $notifySetup $tabIndex $label
-        }
+    if ($tabIndex -and $label -and $hwnd) {
+        & $notifySetup $tabIndex $label $hwnd
+    } elseif ($tabIndex -and $label) {
+        & $notifySetup $tabIndex $label
     }
 }
 
@@ -85,6 +82,11 @@ if ($effort)         { $extraArgs += @("--effort", $effort) }
 # launches so the hook fires with the slot already identified.
 $env:DEVLAYOUT_WINDOW = $windowNum
 $env:DEVLAYOUT_TAB    = $tabIndex
+
+# Claude Code does not expose the effort level to the statusline command, so
+# pass it through the environment for gsd-statusline.js to display.
+if ($effort) { $env:DEVLAYOUT_EFFORT = $effort }
+else { Remove-Item Env:DEVLAYOUT_EFFORT -ErrorAction SilentlyContinue }
 
 # ---------------------------------------------------------------------------
 # Launch
