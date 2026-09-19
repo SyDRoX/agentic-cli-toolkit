@@ -42,6 +42,9 @@ def _root_dir() -> Path:
 ROOT = _root_dir()
 PRESETS_DIR = ROOT / "custom-layouts"
 REPOS_FILE = ROOT / "repos.json"
+
+# Trailing item in the working-directory dropdown; picking it opens a folder chooser.
+BROWSE_CHOICE = "Browse..."
 INVOKE_PS1 = ROOT / "ps1-scripts" / "Invoke-CustomLayout.ps1"
 SLOT_START = 100
 
@@ -359,7 +362,9 @@ class LayoutUI(ctk.CTk):
         self._button(top, "Load", self._browse_load_preset).pack(side=tk.LEFT, padx=2)
         self._button(top, "Save", self._save_preset).pack(side=tk.LEFT, padx=2)
         self._button(top, "Delete", self._delete_preset).pack(side=tk.LEFT, padx=2)
-        self._button(top, "Repos...", self._manage_repos).pack(side=tk.LEFT, padx=(12, 2))
+        self._button(top, "Work Directories", self._manage_repos, width=130).pack(
+            side=tk.LEFT, padx=(12, 2)
+        )
         self._button(top, "Launch", self._launch, accent=True).pack(side=tk.RIGHT, padx=2)
         self._button(top, "Dry run", lambda: self._launch(dry_run=True)).pack(side=tk.RIGHT, padx=2)
 
@@ -414,13 +419,13 @@ class LayoutUI(ctk.CTk):
         tabs_outer.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
         cols = ("title", "agent", "model", "effort", "context", "path")
-        self.tabs_tree = ttk.Treeview(tabs_frame, columns=cols, show="headings", height=10)
+        self.tabs_tree = ttk.Treeview(tabs_frame, columns=cols, show="headings", height=5)
         self.tabs_tree.heading("title", text="Title", anchor="w")
         self.tabs_tree.heading("agent", text="Agent", anchor="w")
         self.tabs_tree.heading("model", text="Model", anchor="w")
         self.tabs_tree.heading("effort", text="Effort", anchor="w")
         self.tabs_tree.heading("context", text="Context window", anchor="w")
-        self.tabs_tree.heading("path", text="Working dir", anchor="w")
+        self.tabs_tree.heading("path", text="Working directory", anchor="w")
         self.tabs_tree.column("title", width=90, stretch=False)
         self.tabs_tree.column("agent", width=90, stretch=False)
         self.tabs_tree.column("model", width=110, stretch=False)
@@ -588,10 +593,10 @@ class LayoutUI(ctk.CTk):
                 json.dumps({"repos": self.repos}, indent=2) + "\n", encoding="utf-8"
             )
         except OSError as exc:
-            messagebox.showerror("Repo catalog", f"Could not save {REPOS_FILE}: {exc}")
+            messagebox.showerror("Work directories", f"Could not save {REPOS_FILE}: {exc}")
 
     def _manage_repos(self) -> None:
-        dialog = self._toplevel(self, "Repository catalog")
+        dialog = self._toplevel(self, "Work directories")
         dialog.geometry("620x360")
 
         tree = ttk.Treeview(dialog, columns=("label", "path"), show="headings", selectmode="browse")
@@ -632,7 +637,11 @@ class LayoutUI(ctk.CTk):
             if index is None:
                 return
             repo = self.repos[index]
-            if not messagebox.askyesno("Remove repo", f"Remove '{repo['label']}' from the catalog?", parent=dialog):
+            if not messagebox.askyesno(
+                "Remove work directory",
+                f"Remove '{repo['label']}' from the list?",
+                parent=dialog,
+            ):
                 return
             del self.repos[index]
             self._save_repos()
@@ -646,7 +655,9 @@ class LayoutUI(ctk.CTk):
 
     def _edit_repo_dialog(self, parent: any, index: int | None = None) -> ctk.CTkToplevel:
         repo = self.repos[index] if index is not None else {"label": "", "path": ""}
-        dialog = self._toplevel(parent, "Edit repository" if index is not None else "Add repository")
+        dialog = self._toplevel(
+            parent, "Edit work directory" if index is not None else "Add work directory"
+        )
 
         label_var = tk.StringVar(value=repo["label"])
         path_var = tk.StringVar(value=repo["path"])
@@ -668,11 +679,15 @@ class LayoutUI(ctk.CTk):
         def save() -> None:
             label, path = label_var.get().strip(), path_var.get().strip()
             if not label or not path:
-                messagebox.showerror("Repo", "Both name and working directory are required.", parent=dialog)
+                messagebox.showerror(
+                    "Work directory", "Both name and working directory are required.", parent=dialog
+                )
                 return
             for i, existing in enumerate(self.repos):
                 if i != index and existing["label"].casefold() == label.casefold():
-                    messagebox.showerror("Repo", "Repository names must be unique.", parent=dialog)
+                    messagebox.showerror(
+                        "Work directory", "Names must be unique.", parent=dialog
+                    )
                     return
             item = {"label": label, "path": path}
             if index is None:
@@ -801,7 +816,7 @@ class LayoutUI(ctk.CTk):
 
     def _add_tab(self) -> None:
         if not self.repos:
-            messagebox.showerror("Repo", "Add a repository to the catalog first.")
+            messagebox.showerror("Work directory", "Add a work directory first.")
             return
         repo = self.repos[0]
         agent_key = AGENT_BY_LABEL[AGENTS[0][0]]
@@ -867,13 +882,32 @@ class LayoutUI(ctk.CTk):
             self._apply_cell_edit(idx, col_name, value)
             self._end_cell_edit()
 
-        if col_name in ("title", "path"):
-            current = tab.get("title", "") if col_name == "title" else tab.get("workingDir", "")
-            var = tk.StringVar(value=current)
+        if col_name == "title":
+            var = tk.StringVar(value=tab.get("title", ""))
             widget = self._entry(tree, var, width=w)
             widget.bind("<Return>", lambda _e: commit(var.get().strip()))
             widget.bind("<FocusOut>", lambda _e: commit(var.get().strip()))
             widget.bind("<Escape>", lambda _e: self._end_cell_edit())
+        elif col_name == "path":
+            current = tab.get("workingDir", "")
+            choices = list(dict.fromkeys(repo["path"] for repo in self.repos))
+            if current and current not in choices:
+                choices.insert(0, current)
+            choices.append(BROWSE_CHOICE)
+
+            def pick_dir(value: str) -> None:
+                if value != BROWSE_CHOICE:
+                    commit(value)
+                    return
+                # The option menu is destroyed first so the dialog does not sit under a live editor.
+                self._end_cell_edit()
+                chosen = filedialog.askdirectory(parent=self, initialdir=current or str(ROOT))
+                if chosen:
+                    self._apply_cell_edit(idx, "path", chosen)
+
+            var = tk.StringVar(value=current)
+            widget = self._option(tree, var, choices, width=w, command=pick_dir)
+            widget.bind("<FocusOut>", lambda _e: self._end_cell_edit())
         elif col_name == "agent":
             var = tk.StringVar(value=AGENT_BY_KEY.get(agent_key, AGENTS[0][0]))
             widget = self._option(
