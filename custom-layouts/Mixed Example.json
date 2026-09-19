@@ -9,7 +9,9 @@
         {
           "title": "PS-1",
           "workingDir": "C:\\Repos\\PotatoSandwich",
-          "agent": "pi"
+          "agent": "pi",
+          "model": "openrouter/tencent/hy4-preview",
+          "contextWindow": "0.25m"
         },
         {
           "title": "PS-2",

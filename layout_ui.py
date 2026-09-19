@@ -58,7 +58,7 @@ DEFAULT_REPOS = [
 AGENTS = [
     ("Claude", "claude"),
     ("Codex", "codex"),
-    ("Pi (hy4)", "pi"),
+    ("Pi", "pi"),
     ("Cursor", "cursor"),
 ]
 AGENT_BY_KEY = {key: label for label, key in AGENTS}
@@ -75,9 +75,15 @@ CLAUDE_MODELS = [
 CODEX_MODELS = [
     "", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
 ]
-MODELS_BY_AGENT = {"claude": CLAUDE_MODELS, "codex": CODEX_MODELS}
+# Pi: --model takes a bare id or "provider/id" (see `pi --list-models`); both the
+# openai-codex GPT models and OpenRouter ids are reachable from the same flag.
+PI_MODELS = [
+    "", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna-pro",
+    "openrouter/tencent/hy4-preview",
+]
+MODELS_BY_AGENT = {"claude": CLAUDE_MODELS, "codex": CODEX_MODELS, "pi": PI_MODELS}
 # Preselect a real model rather than the blank "use CLI default" entry.
-DEFAULT_MODEL_BY_AGENT = {"claude": "sonnet", "codex": "gpt-5.6-sol"}
+DEFAULT_MODEL_BY_AGENT = {"claude": "sonnet", "codex": "gpt-5.6-sol", "pi": "gpt-5.6-luna"}
 
 # --effort (claude) / model_reasoning_effort (codex) - same value set, both real.
 EFFORT_LEVELS = ["", "low", "medium", "high", "xhigh", "max"]
@@ -87,8 +93,15 @@ DEFAULT_EFFORT = "medium"
 CLAUDE_CONTEXT_WINDOWS = ["default[1m]"]
 # Codex takes an arbitrary -c model_context_window=N; models report 272k stock, 872k max.
 CODEX_CONTEXT_WINDOWS = ["default", "0.25m", "0.5m", "MAX"]
-CONTEXT_WINDOWS_BY_AGENT = {"claude": CLAUDE_CONTEXT_WINDOWS, "codex": CODEX_CONTEXT_WINDOWS}
-DEFAULT_CONTEXT_BY_AGENT = {"claude": "default[1m]", "codex": "0.25m"}
+# Pi has no CLI flag; launch-pi.ps1 writes modelOverrides.contextWindow instead.
+# "MAX" resolves to whatever the model catalog reports for the selected model.
+PI_CONTEXT_WINDOWS = ["default", "0.25m", "0.5m", "MAX"]
+CONTEXT_WINDOWS_BY_AGENT = {
+    "claude": CLAUDE_CONTEXT_WINDOWS,
+    "codex": CODEX_CONTEXT_WINDOWS,
+    "pi": PI_CONTEXT_WINDOWS,
+}
+DEFAULT_CONTEXT_BY_AGENT = {"claude": "default[1m]", "codex": "0.25m", "pi": "0.25m"}
 CONTEXT_WINDOWS = CLAUDE_CONTEXT_WINDOWS
 
 
