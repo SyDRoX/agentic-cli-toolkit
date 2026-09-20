@@ -28,7 +28,7 @@ Every supported agent maps its own lifecycle events onto the same two actions:
 | Claude Code | `Stop` | `UserPromptSubmit` | `~/.claude/settings.json` hooks |
 | Codex | `Stop` | `UserPromptSubmit` | `$CODEX_HOME/hooks.json` -> `codex-hook.ps1` |
 | Cursor Agent | `stop` | `beforeSubmitPrompt` | `~/.cursor/hooks.json` -> `cursor-hook.ps1` |
-| pi | `agent_settled`, `ui_prompt_start` | `before_agent_start` | `~/.pi/agent/extensions/agentic-cli-notify.ts` |
+| pi | `agent_settled`, `ui_prompt_start` | `session_start`, `before_agent_start` | `~/.pi/agent/extensions/agentic-cli-notify.ts` |
 
 Each session is isolated by its `WT_SESSION` environment variable, so notifications always target the correct window and tab.
 
@@ -132,7 +132,7 @@ uninstall, delete `~/.pi/agent/extensions/agentic-cli-notify.ts`.
 
 ```powershell
 git clone https://github.com/SyDRoX/dev-layout.git
-cd dev-layoutgentic-cli-notify
+cd dev-layout\agentic-cli-notify
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
@@ -180,7 +180,7 @@ Replace `YOUR_USERNAME` with your Windows username.
 For **every** Claude Code tab, while focused on the correct Windows Terminal window:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\hooksgentic-cli-notify\setup.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\hooks\agentic-cli-notify\setup.ps1"
 ```
 
 This captures the window handle (HWND) and tab position so notifications can target the right window and switch to the right tab.

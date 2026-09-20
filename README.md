@@ -66,7 +66,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\agentic-cli-notify\install
 powershell -ExecutionPolicy Bypass -File .\agentic-cli-notify\ps1-scripts\install-codex.ps1
 ```
 
-Run `powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\hooksgentic-cli-notify\setup.ps1"` from each focused
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\hooks\agentic-cli-notify\setup.ps1"` from each focused
 Windows Terminal tab after installation. Re-run it after restarting Terminal or
 reordering tabs.
 
