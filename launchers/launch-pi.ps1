@@ -5,8 +5,23 @@
 # Model/Effort/ContextWindow all come from the layout JSON:
 #   model         -> --model <pattern>, e.g. "gpt-5.6-luna" or "openrouter/tencent/hy4-preview"
 #   effort        -> --thinking <level> (off|minimal|low|medium|high|xhigh|max)
-#   contextWindow -> modelOverrides.contextWindow in ~/.pi/agent/models.json,
-#                    because pi has no CLI flag for the context window.
+#   contextWindow -> modelOverrides.contextWindow in a per-tab config directory,
+#                    because pi has no CLI flag for the context window and reads
+#                    models.json only from its config directory.
+#
+# Why the per-tab config directory: modelOverrides live in <config dir>/models.json,
+# and that file is global. Writing it from every tab makes the last tab launched win
+# for all of them. pi resolves its whole config directory from PI_CODING_AGENT_DIR,
+# so each tab gets an overlay directory under ~/.pi/devlayout/w<N>-t<M> that holds
+# its own models.json and shares everything else with ~/.pi/agent through NTFS
+# junctions (subdirectories) and hard links (files). pi writes those shared files in
+# place, never through a temp-file rename, so a hard link keeps both names on the
+# same data. Sessions stay in the global directory via PI_CODING_AGENT_SESSION_DIR,
+# which keeps `pi --continue` per working directory.
+#
+# Tabs left on contextWindow "default" run pi untouched, with no overlay at all.
+
+#Requires -Version 5.1
 
 [CmdletBinding()]
 param(
@@ -22,11 +37,23 @@ $DefaultModel = "gpt-5.6-luna"
 
 $agentDir = Join-Path $env:USERPROFILE ".pi\agent"
 $storePath = Join-Path $agentDir "models-store.json"
+$overlayRoot = Join-Path $env:USERPROFILE ".pi\devlayout"
+
+# Subdirectories of the config directory that every tab must share. Junctioned.
+$SharedAgentDirs = @("bin", "extensions", "npm", "themes", "tools", "prompts")
+# Files of the config directory that every tab must share. Hard linked.
+$SharedAgentFiles = @(
+    "auth.json", "models-store.json", "settings.json",
+    "statusline.json", "keybindings.json", "trust.json"
+)
+# Shared files pi creates on demand. Seed them in the global directory first so the
+# hard link exists before pi writes, otherwise the write lands in the overlay only.
+$SeededAgentFiles = @{ "trust.json" = "{}" }
 
 function Get-PiModelInfo {
     <#
         Resolve a layout `model` value to the provider key and bare model id that
-        ~/.pi/agent/models.json wants for modelOverrides. Accepts both the bare id
+        models.json wants for modelOverrides. Accepts both the bare id
         ("gpt-5.6-luna") and the provider-qualified form pi's --model also takes
         ("openrouter/tencent/hy4-preview").
     #>
@@ -86,11 +113,14 @@ function Resolve-PiContextWindow {
     <#
         Translate the layout's contextWindow token into a token count. "MAX" means
         the model's own stock window from the catalog; a raw integer passes through.
+        Note that for the OpenAI GPT-5.6 models the catalog window is pi's
+        short-context-pricing default (272000), not the provider ceiling, so "MAX"
+        is a no-op there and "1m" is what opts into the long-context window.
     #>
     param([string]$Token, $ModelMax)
 
     switch -Regex ($Token) {
-        '^$'          { return $null }
+        '^$'            { return $null }
         '^(?i)default$' { return $null }
         '^(?i)0\.25m$'  { return 256000 }
         '^(?i)0\.5m$'   { return 512000 }
@@ -98,53 +128,85 @@ function Resolve-PiContextWindow {
         '^(?i)max$'     { if ($ModelMax) { return [int]$ModelMax } else { return $null } }
         '^\d+$'         { return [int]$Token }
     }
-    Write-Warning "[DevLayout] unknown contextWindow '$Token'; leaving models.json alone."
+    Write-Warning "[DevLayout] unknown contextWindow '$Token'; leaving the context window alone."
     return $null
 }
 
-function Set-PiContextWindow {
+function Remove-PiAgentOverlay {
     <#
-        pi reads per-model overrides from ~/.pi/agent/models.json. Rewrite only the
-        one model's contextWindow and leave every other key in that file untouched.
+        Tear down an overlay directory. Junctions are removed as reparse points
+        first: Remove-Item -Recurse on a junction can delete the target's contents
+        on Windows PowerShell 5.1, and the target here is the real config directory.
     #>
-    param([string]$Provider, [string]$ModelId, [int]$Window)
+    param([string]$Path)
 
-    if (-not $Provider -or -not $ModelId -or -not $Window) { return }
+    if (-not (Test-Path -LiteralPath $Path)) { return }
 
-    if (-not (Test-Path $agentDir)) {
-        New-Item -ItemType Directory -Path $agentDir -Force | Out-Null
-    }
-
-    $path = Join-Path $agentDir "models.json"
-    $root = $null
-    if (Test-Path $path) {
-        try {
-            $root = Get-Content $path -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable
-        } catch {
-            Write-Warning "[DevLayout] could not parse $path; leaving it alone."
-            return
+    foreach ($name in $SharedAgentDirs) {
+        $link = Join-Path $Path $name
+        if (Test-Path -LiteralPath $link) {
+            try { [System.IO.Directory]::Delete($link, $false) } catch { }
         }
     }
-    if (-not $root) { $root = @{} }
-    if (-not $root.providers) { $root.providers = @{} }
-    if (-not $root.providers[$Provider]) { $root.providers[$Provider] = @{} }
-    if (-not $root.providers[$Provider].modelOverrides) {
-        $root.providers[$Provider].modelOverrides = @{}
+    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+function New-PiAgentOverlay {
+    <#
+        Build the per-tab config directory and return its path, or $null when the
+        overlay could not be built. The overlay is rebuilt on every launch so the
+        hard links always point at the current global files.
+    #>
+    param(
+        [string]$Slot,
+        [string]$Provider,
+        [string]$ModelId,
+        [int]$Tokens
+    )
+
+    if (-not (Test-Path -LiteralPath $agentDir)) {
+        Write-Warning "[DevLayout] $agentDir does not exist; running pi with its own config."
+        return $null
     }
 
-    $overrides = $root.providers[$Provider].modelOverrides
-    $current = $overrides[$ModelId]
-    if ($current -is [hashtable] -and $current.contextWindow -eq $Window) {
-        return
+    $path = Join-Path $overlayRoot $Slot
+
+    try {
+        Remove-PiAgentOverlay -Path $path
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+
+        foreach ($name in $SharedAgentDirs) {
+            $target = Join-Path $agentDir $name
+            if (Test-Path -LiteralPath $target) {
+                New-Item -ItemType Junction -Path (Join-Path $path $name) -Target $target -ErrorAction Stop | Out-Null
+            }
+        }
+
+        foreach ($name in $SharedAgentFiles) {
+            $target = Join-Path $agentDir $name
+            if (-not (Test-Path -LiteralPath $target) -and $SeededAgentFiles.ContainsKey($name)) {
+                $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+                [System.IO.File]::WriteAllText($target, $SeededAgentFiles[$name], $utf8NoBom)
+            }
+            if (Test-Path -LiteralPath $target) {
+                New-Item -ItemType HardLink -Path (Join-Path $path $name) -Target $target -ErrorAction Stop | Out-Null
+            }
+        }
+
+        # Plain hashtables only: Windows PowerShell 5.1 ConvertTo-Json serializes a
+        # nested [ordered] dictionary as its type name instead of its contents.
+        $root = @{ providers = @{ $Provider = @{ modelOverrides = @{ $ModelId = @{ contextWindow = $Tokens } } } } }
+        $json = $root | ConvertTo-Json -Depth 10
+        # Set-Content -Encoding utf8 writes a BOM on 5.1; write the bytes directly.
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText((Join-Path $path "models.json"), $json, $utf8NoBom)
+    } catch {
+        Write-Warning "[DevLayout] could not build the pi config overlay at ${path}: $($_.Exception.Message)"
+        Remove-PiAgentOverlay -Path $path
+        return $null
     }
 
-    if (-not ($current -is [hashtable])) { $current = @{} }
-    $current.contextWindow = $Window
-    $overrides[$ModelId] = $current
-
-    $json = $root | ConvertTo-Json -Depth 20
-    Set-Content -Path $path -Value $json -Encoding utf8
-    Write-Host "[DevLayout] set $Provider/$ModelId contextWindow=$Window in models.json" -ForegroundColor DarkGray
+    return $path
 }
 
 $cwd = (Get-Location).Path.TrimEnd('\')
@@ -152,6 +214,12 @@ $cwd = (Get-Location).Path.TrimEnd('\')
 $modelPattern = if ($Model) { $Model } else { $DefaultModel }
 $info = Get-PiModelInfo -Pattern $modelPattern
 $window = Resolve-PiContextWindow -Token $ContextWindow -ModelMax $info.ContextWindow
+
+# An override equal to the catalog window changes nothing, so skip the overlay and
+# leave the tab on pi's own configuration.
+if ($window -and $info.ContextWindow -and [int]$info.ContextWindow -eq [int]$window) {
+    $window = $null
+}
 
 $piArgs = @("--continue", "--model", $modelPattern)
 if ($Effort) { $piArgs += @("--thinking", $Effort) }
@@ -162,7 +230,20 @@ Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 Write-Host "[DevLayout] model: $modelPattern (thinking ${Effort}, $ctxNote)" -ForegroundColor DarkGray
 
 if ($window) {
-    Set-PiContextWindow -Provider $info.Provider -ModelId $info.ModelId -Window $window
+    if (-not $info.Provider) {
+        Write-Warning "[DevLayout] no provider known for model '$modelPattern'; leaving the context window alone."
+    } else {
+        $slotWindow = if ($WindowNum) { $WindowNum } else { "0" }
+        $slotTab = if ($TabIndex) { $TabIndex } else { "0" }
+        $overlay = New-PiAgentOverlay -Slot "w$slotWindow-t$slotTab" -Provider $info.Provider -ModelId $info.ModelId -Tokens $window
+        if ($overlay) {
+            $env:PI_CODING_AGENT_DIR = $overlay
+            if (-not $env:PI_CODING_AGENT_SESSION_DIR) {
+                $env:PI_CODING_AGENT_SESSION_DIR = Join-Path $agentDir "sessions"
+            }
+            Write-Host "[DevLayout] set $($info.Provider)/$($info.ModelId) contextWindow=$window via $overlay" -ForegroundColor DarkGray
+        }
+    }
 }
 
 & pi @piArgs

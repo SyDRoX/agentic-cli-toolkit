@@ -96,15 +96,20 @@ DEFAULT_EFFORT = "medium"
 CLAUDE_CONTEXT_WINDOWS = ["default[1m]"]
 # Codex takes an arbitrary -c model_context_window=N; models report 272k stock, 872k max.
 CODEX_CONTEXT_WINDOWS = ["default", "0.25m", "0.5m", "MAX"]
-# Pi has no CLI flag; launch-pi.ps1 writes modelOverrides.contextWindow instead.
-# "MAX" resolves to whatever the model catalog reports for the selected model.
-PI_CONTEXT_WINDOWS = ["default", "0.25m", "0.5m", "MAX"]
+# Pi has no CLI flag; launch-pi.ps1 writes modelOverrides.contextWindow into a
+# per-tab config directory instead. "MAX" resolves to whatever the model catalog
+# reports for the selected model, which for the OpenAI GPT-5.6 models is pi's
+# short-context-pricing default (272k) rather than the provider ceiling - pick
+# "1m" to opt those into the long-context window.
+PI_CONTEXT_WINDOWS = ["default", "0.25m", "0.5m", "1m", "MAX"]
 CONTEXT_WINDOWS_BY_AGENT = {
     "claude": CLAUDE_CONTEXT_WINDOWS,
     "codex": CODEX_CONTEXT_WINDOWS,
     "pi": PI_CONTEXT_WINDOWS,
 }
-DEFAULT_CONTEXT_BY_AGENT = {"claude": "default[1m]", "codex": "0.25m", "pi": "0.25m"}
+# Pi defaults to "default": 0.25m is below the stock window of several pi models,
+# so preselecting it would silently shrink them.
+DEFAULT_CONTEXT_BY_AGENT = {"claude": "default[1m]", "codex": "0.25m", "pi": "default"}
 CONTEXT_WINDOWS = CLAUDE_CONTEXT_WINDOWS
 
 

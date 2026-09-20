@@ -2,7 +2,7 @@
 
 Windows-only tooling that launches agentic CLIs (Claude Code, Codex, pi, Cursor Agent)
 across repos in Windows Terminal, keeps per-tab sessions resumable, and raises desktop
-notifications when an agent needs input. Upstream: SyDroX/dev-layout (MIT).
+notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 
 ## Components
 
@@ -38,7 +38,8 @@ notifications when an agent needs input. Upstream: SyDroX/dev-layout (MIT).
 - `agent`: `claude` | `codex` | `pi` | `cursor` (alias `agent`). Case-insensitive.
 - `model`, `effort`, `contextWindow` optional; empty = CLI default. Cursor ignores all three.
 - `effort`: `low|medium|high|xhigh|max`. Claude `--effort`, Codex `model_reasoning_effort`, pi `--thinking`.
-- `contextWindow`: Claude only `default[1m]`; Codex/pi `default|0.25m|0.5m|MAX`. Pi has no flag, so `launch-pi.ps1` writes `modelOverrides.contextWindow` into `~/.pi/agent/models.json`.
+- `contextWindow`: Claude only `default[1m]`; Codex `default|0.25m|0.5m|MAX`; pi `default|0.25m|0.5m|1m|MAX`. Pi has no flag, so `launch-pi.ps1` writes `modelOverrides.contextWindow` into a per-tab config directory (see below).
+- Pi `MAX` means the selected model's catalog window from `~/.pi/agent/models-store.json`. For the OpenAI GPT-5.6 models that catalog value is pi's short-context-pricing default (272000), not the provider ceiling, so `MAX` is a no-op there and `1m` is what opts them into the long-context window. Verify any change with `pi --list-models <id>`, which prints the effective window.
 - Model/effort/context option lists live in `layout_ui.py` constants (`CLAUDE_MODELS`, `CODEX_MODELS`, `PI_MODELS`, ...).
 
 ## Invariants (do not break)
@@ -47,6 +48,7 @@ notifications when an agent needs input. Upstream: SyDroX/dev-layout (MIT).
 - **Tab order is load-bearing** for same reason. Reordering tabs remaps conversations.
 - **Claude resume priority:** state file `~/.claude/dev-layout/.devlayout-session-w<N>-t<M>` > deterministic slot UUID > fresh session. Missing or corrupt transcript = fresh. Hook no-ops unless `DEVLAYOUT_WINDOW`/`DEVLAYOUT_TAB` env set.
 - **Codex/pi/Cursor resume is per working dir** (`codex resume --last`, `pi --continue`, `agent --continue --workspace`). No slot logic.
+- **Pi context window is a per-tab config overlay.** pi reads `modelOverrides` only from `<config dir>/models.json`, and that file is global, so writing it from every tab makes the last tab launched win for all of them. `launch-pi.ps1` therefore points `PI_CODING_AGENT_DIR` at `~/.pi/devlayout/w<N>-t<M>`, an overlay rebuilt on every launch that holds its own `models.json` and shares the rest of `~/.pi/agent` - `bin`, `extensions`, `npm`, `themes`, `tools`, `prompts` as NTFS junctions; `auth.json`, `models-store.json`, `settings.json`, `statusline.json`, `keybindings.json`, `trust.json` as hard links. Hard links are safe because pi rewrites those files in place (`writeFileSync`), never through a temp-file rename; if that changes upstream, the overlay would go stale and the shared files must be junctioned or copied instead. `trust.json` is seeded as `{}` in the global directory so a `/trust` decision persists there. Sessions stay global via `PI_CODING_AGENT_SESSION_DIR`, which keeps `pi --continue` per working dir. Tabs on `contextWindow: "default"`, or whose value equals the model's catalog window, get no overlay and no env vars. Never write `~/.pi/agent/models.json` from a launcher.
 - Launchers clear inherited `CLAUDECODE` env to avoid nested-session error.
 - `register-session-hook.js` edits only its own key in `~/.claude/settings.json`. Do not replace with a PowerShell JSON round-trip (needs PS 6+, reformats file).
 - Notification state keyed by `WT_SESSION`. Hooks outside Windows Terminal are ignored.
@@ -83,6 +85,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\agentic-cli-notify\ps1-scr
 
 # Explorer context menu
 powershell -ExecutionPolicy Bypass -File .\ps1-scripts\LLM_ContextMenu_Toggle.ps1 -Mode New
+
+# Check the effective pi context window of one tab's overlay
+$env:PI_CODING_AGENT_DIR = "$env:USERPROFILE\.pi\devlayout\w102-t0"; pi --list-models gpt-5.6-luna
 ```
 
 ## Adding a new agent
