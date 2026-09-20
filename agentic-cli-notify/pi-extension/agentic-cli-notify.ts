@@ -3,12 +3,13 @@
 // pi has no external hook config like Claude Code or Codex, so the same
 // notifications are driven from an extension:
 //
+//   session_start      -> resume    (tab is up, capture its window handle)
 //   before_agent_start -> resume    (user just submitted a prompt)
 //   agent_settled      -> attention (pi will not continue on its own)
 //   ui_prompt_start    -> attention (pi is blocked on a confirm/select dialog)
 //
-// The notifier is spawned detached and its output discarded, so a broken or
-// missing install can never stall or crash the session.
+// The notifier's output is discarded, so a broken or missing install can never
+// stall or crash the session.
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -48,7 +49,13 @@ function notify(action: "attention" | "resume"): void {
         "-Agent",
         "Pi",
       ],
-      { detached: true, stdio: "ignore", windowsHide: true },
+      // No `detached`. DETACHED_PROCESS leaves powershell.exe without a
+      // console and it exits immediately with code 0 without running the
+      // script, so every notification was silently dropped. `windowsHide`
+      // gives the child its own hidden console (CREATE_NO_WINDOW) instead,
+      // which also keeps powershell.exe from renaming the Windows Terminal
+      // tab to "Windows PowerShell".
+      { stdio: "ignore", windowsHide: true },
     );
     child.on("error", () => {});
     child.unref();

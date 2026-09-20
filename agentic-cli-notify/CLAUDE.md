@@ -11,7 +11,7 @@ Hooks (cmd.exe) -> notify.ps1 (PowerShell) -> popup.ps1 (WPF)
   - Claude Code: `attention.cmd` / `resume.cmd` from `~/.claude/settings.json`
   - Codex: `codex-hook.ps1` from `$CODEX_HOME/hooks.json` (event read from the stdin payload)
   - Cursor Agent: `cursor-hook.ps1` from `~/.cursor/hooks.json`, events `stop` and `beforeSubmitPrompt`; the event is passed as `-Action` because the payload field name differs between Cursor versions
-  - pi: `pi-extension/agentic-cli-notify.ts`, installed to `~/.pi/agent/extensions/`, on `agent_settled` / `ui_prompt_start` / `before_agent_start`
+  - pi: `pi-extension/agentic-cli-notify.ts`, installed to `~/.pi/agent/extensions/`, on `agent_settled` / `ui_prompt_start` / `session_start` / `before_agent_start`. Spawn the notifier without `detached`: DETACHED_PROCESS gives powershell.exe no console and it exits 0 without running the script. Use `windowsHide` so the child gets its own hidden console and does not rename the WT tab.
 - `notify.ps1 -Agent` accepts `Claude`, `Codex`, `Pi`, `Cursor`; the value is only a popup title
 - `notify.ps1` is the dispatcher: flashes the taskbar, launches/kills popup processes
 - `popup.ps1` is a standalone WPF window launched as a separate PowerShell process with `-STA` flag

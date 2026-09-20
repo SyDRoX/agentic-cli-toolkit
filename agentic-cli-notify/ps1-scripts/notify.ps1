@@ -142,7 +142,13 @@ try {
                     )
                     if ($tabIdx -ge 1 -and $tabIdx -le $tabs.Count) {
                         $rawName = $tabs[$tabIdx - 1].Current.Name
-                        $tabName = ($rawName -replace '[^\x20-\x7E]', '').Trim()
+                        # Agents prefix the tab with a glyph - pi uses a pi
+                        # character, so "pi - PotatoSandwich". Dropping the
+                        # non-ASCII glyph leaves the separator behind and the
+                        # popup would read "Pi - - PotatoSandwich", so strip
+                        # any leading separator as well.
+                        $tabName = ($rawName -replace '[^\x20-\x7E]', '') -replace '^[\s\-:|]+', ''
+                        $tabName = $tabName.Trim()
                         if ($tabName) {
                             $labelFile = "$stateDir\.label-$sessionId"
                             $existingLabel = ""
