@@ -111,5 +111,5 @@ opened.
 | `custom-layouts/` | Example layout presets |
 | `repos.json` | Editable repository catalog |
 
-Adapted from [SyDroX/dev-layout](https://github.com/SyDroX/dev-layout) under
+Adapted from [SyDRoX/dev-layout](https://github.com/SyDRoX/dev-layout) under
 the MIT license.

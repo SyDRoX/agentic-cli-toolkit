@@ -31,7 +31,7 @@
     reordering the list reassigns which conversation each tab reopens. Appending
     a tab is safe; reordering existing ones is not.
 .NOTES
-    Adapted from SyDroX/dev-layout, MIT.
+    Adapted from SyDRoX/dev-layout, MIT.
 #>
 
 # ============================================================================

@@ -131,8 +131,8 @@ uninstall, delete `~/.pi/agent/extensions/agentic-cli-notify.ts`.
 ### 1. Clone and install
 
 ```powershell
-git clone https://github.com/SyDRoX/dev-layout.git
-cd dev-layout\agentic-cli-notify
+git clone https://github.com/SyDRoX/agentic-cli-toolkit.git
+cd agentic-cli-toolkit\agentic-cli-notify
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
