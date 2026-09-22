@@ -46,6 +46,9 @@ REPOS_FILE = ROOT / "repos.json"
 # Trailing item in the working-directory dropdown; picking it opens a folder chooser.
 BROWSE_CHOICE = "Browse..."
 INVOKE_PS1 = ROOT / "ps1-scripts" / "Invoke-CustomLayout.ps1"
+# Small runtime state beside the exe: which preset was open last, so the next
+# start reopens it instead of an empty "Untitled".
+UI_STATE_FILE = ROOT / ".layout-ui-state.json"
 SLOT_START = 100
 
 DEFAULT_REPOS = [
@@ -155,6 +158,52 @@ def collect_used_window_nums(exclude: Path | None = None) -> set[int]:
     return used
 
 
+def slot_owners(exclude: Path | None = None) -> dict[int, list[str]]:
+    """Map each window slot to the preset names that already claim it.
+
+    Used to show, next to the slot field, which other presets a number belongs
+    to - sharing a slot between presets makes them share Claude conversations.
+    """
+    owners: dict[int, list[str]] = {}
+    if not PRESETS_DIR.exists():
+        return owners
+    for path in sorted(PRESETS_DIR.glob("*.json")):
+        if exclude and path.resolve() == exclude.resolve():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for win in data.get("windows", []):
+            num = win.get("windowNum")
+            if isinstance(num, int):
+                owners.setdefault(num, []).append(path.stem)
+    return owners
+
+
+def load_last_preset() -> str | None:
+    try:
+        data = json.loads(UI_STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    name = data.get("lastPreset") if isinstance(data, dict) else None
+    return str(name) if name else None
+
+
+def save_last_preset(name: str | None) -> None:
+    """Remember the preset to reopen next start. Never fatal: the UI works without it."""
+    try:
+        if name:
+            UI_STATE_FILE.write_text(
+                json.dumps({"lastPreset": name}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        elif UI_STATE_FILE.exists():
+            UI_STATE_FILE.unlink()
+    except OSError:
+        pass
+
+
 class Spinbox(ctk.CTkFrame):
     """customtkinter has no spinbox, so pair a themed entry with clamped -/+ buttons."""
 
@@ -251,7 +300,7 @@ class LayoutUI(ctk.CTk):
         self._cell_editor: any = None
 
         self._build()
-        self._new_preset(initial=True)
+        self._restore_last_preset()
         self._refresh_preset_list()
 
     # --- themed widget factories ----------------------------------------
@@ -414,7 +463,8 @@ class LayoutUI(ctk.CTk):
         Spinbox(row, variable=self.window_num_var, from_=SLOT_START, to=999, mode=self.mode).pack(
             side=tk.LEFT
         )
-        self._label(row, "keep stable for session resume", muted=True).pack(side=tk.LEFT, padx=8)
+        self.slot_hint = self._label(row, "", muted=True)
+        self.slot_hint.pack(side=tk.LEFT, padx=8)
 
         self._button(form, "Apply window settings", self._apply_window_settings, width=150).pack(
             anchor=tk.E, padx=8, pady=(6, 8)
@@ -480,6 +530,42 @@ class LayoutUI(ctk.CTk):
 
     # --- preset CRUD -----------------------------------------------------
 
+    def _restore_last_preset(self) -> None:
+        """Reopen the preset used last, falling back to a fresh one."""
+        name = load_last_preset()
+        if name:
+            path = PRESETS_DIR / f"{name}.json"
+            if path.exists():
+                self._load_preset_path(path)
+                self.preset_combo.set(name)
+                return
+        self._new_preset(initial=True)
+
+    def _update_slot_hint(self) -> None:
+        """Say who else owns the selected window's slot, and flag a clash."""
+        if not hasattr(self, "slot_hint"):
+            return
+        try:
+            slot = int(self.window_num_var.get())
+        except (tk.TclError, ValueError):
+            return
+        mine = [
+            i + 1
+            for i, w in enumerate(self.windows)
+            if w.get("windowNum") == slot and i != self.current_window_index
+        ]
+        others = slot_owners(self._preset_path).get(slot, [])
+        if mine:
+            text = "also used by window " + ", ".join(str(i) for i in mine) + " in this preset"
+            role = "warn"
+        elif others:
+            text = "shares sessions with preset: " + ", ".join(others)
+            role = "warn"
+        else:
+            text = "free - keep stable for session resume"
+            role = "muted"
+        self.slot_hint.configure(text=text, text_color=resolve_color(role, self.mode))
+
     def _refresh_preset_list(self) -> None:
         names = sorted(p.stem for p in PRESETS_DIR.glob("*.json"))
         current = self.preset_var.get()
@@ -491,6 +577,7 @@ class LayoutUI(ctk.CTk):
         slot = next_window_num(used)
         self._preset_path = None
         self.preset_var.set("Untitled")
+        save_last_preset(None)
         self.windows = [
             {
                 "name": "Terminal 1",
@@ -531,6 +618,7 @@ class LayoutUI(ctk.CTk):
             return
         self._preset_path = path
         self.preset_var.set(path.stem)
+        save_last_preset(path.stem)
         self.windows = data.get("windows") or []
         if not self.windows:
             self.windows = [
@@ -576,6 +664,7 @@ class LayoutUI(ctk.CTk):
         self._preset_path = path
         self._refresh_preset_list()
         self.preset_var.set(name)
+        save_last_preset(name)
         messagebox.showinfo("Saved", f"Wrote {path}")
 
     def _delete_preset(self) -> None:
@@ -726,7 +815,8 @@ class LayoutUI(ctk.CTk):
             ) or "(empty)"
             self.window_list.insert(
                 tk.END,
-                f"{i + 1}. {win.get('name', 'Window')}  [{summary}]",
+                f"{i + 1}. {win.get('name', 'Window')}  "
+                f"slot {win.get('windowNum', '?')}  [{summary}]",
             )
         if self.current_window_index is not None and self.windows:
             self.window_list.selection_clear(0, tk.END)
@@ -746,6 +836,7 @@ class LayoutUI(ctk.CTk):
         self.window_name_var.set(win.get("name", f"Terminal {index + 1}"))
         self.monitor_var.set(int(win.get("targetMonitor", 0)))
         self.window_num_var.set(int(win.get("windowNum", SLOT_START)))
+        self._update_slot_hint()
         self._refresh_tabs_tree()
 
     def _apply_window_settings(self, silent: bool = False) -> None:
@@ -762,6 +853,7 @@ class LayoutUI(ctk.CTk):
         win["targetMonitor"] = monitor
         win["windowNum"] = slot
         self._refresh_window_list()
+        self._update_slot_hint()
         if not silent:
             messagebox.showinfo("Updated", "Window settings applied.")
 
@@ -1022,6 +1114,7 @@ class LayoutUI(ctk.CTk):
         )
         self._preset_path = path
         self._refresh_preset_list()
+        save_last_preset(name if name.lower() != "untitled" else None)
 
         args = [
             "powershell",

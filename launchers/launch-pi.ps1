@@ -16,8 +16,15 @@
 # its own models.json and shares everything else with ~/.pi/agent through NTFS
 # junctions (subdirectories) and hard links (files). pi writes those shared files in
 # place, never through a temp-file rename, so a hard link keeps both names on the
-# same data. Sessions stay in the global directory via PI_CODING_AGENT_SESSION_DIR,
-# which keeps `pi --continue` per working directory.
+# same data.
+#
+# The sessions directory is one of the junctioned subdirectories. pi stores a session
+# in <config dir>\sessions\--<cwd with separators replaced>--, so junctioning
+# <overlay>\sessions onto ~/.pi/agent/sessions keeps every tab on the one global
+# store while pi keeps its per-working-directory split, which is what `pi --continue`
+# resumes from. Do not set PI_CODING_AGENT_SESSION_DIR instead: that variable names
+# the exact session directory, so pi drops the per-working-directory split and every
+# tab resumes whatever session was written last, in any repo.
 #
 # Tabs left on contextWindow "default" run pi untouched, with no overlay at all.
 
@@ -40,7 +47,11 @@ $storePath = Join-Path $agentDir "models-store.json"
 $overlayRoot = Join-Path $env:USERPROFILE ".pi\devlayout"
 
 # Subdirectories of the config directory that every tab must share. Junctioned.
-$SharedAgentDirs = @("bin", "extensions", "npm", "themes", "tools", "prompts")
+$SharedAgentDirs = @("bin", "extensions", "npm", "themes", "tools", "prompts", "sessions")
+# Shared subdirectories pi creates on demand. Create them in the global directory
+# first so the junction has a target, otherwise the tab writes into the overlay,
+# which is rebuilt on the next launch.
+$SeededAgentDirs = @("sessions")
 # Files of the config directory that every tab must share. Hard linked.
 $SharedAgentFiles = @(
     "auth.json", "models-store.json", "settings.json",
@@ -177,6 +188,9 @@ function New-PiAgentOverlay {
 
         foreach ($name in $SharedAgentDirs) {
             $target = Join-Path $agentDir $name
+            if (-not (Test-Path -LiteralPath $target) -and $SeededAgentDirs -contains $name) {
+                New-Item -ItemType Directory -Path $target -Force | Out-Null
+            }
             if (Test-Path -LiteralPath $target) {
                 New-Item -ItemType Junction -Path (Join-Path $path $name) -Target $target -ErrorAction Stop | Out-Null
             }
@@ -238,9 +252,6 @@ if ($window) {
         $overlay = New-PiAgentOverlay -Slot "w$slotWindow-t$slotTab" -Provider $info.Provider -ModelId $info.ModelId -Tokens $window
         if ($overlay) {
             $env:PI_CODING_AGENT_DIR = $overlay
-            if (-not $env:PI_CODING_AGENT_SESSION_DIR) {
-                $env:PI_CODING_AGENT_SESSION_DIR = Join-Path $agentDir "sessions"
-            }
             Write-Host "[DevLayout] set $($info.Provider)/$($info.ModelId) contextWindow=$window via $overlay" -ForegroundColor DarkGray
         }
     }

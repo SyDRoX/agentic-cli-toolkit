@@ -10,6 +10,9 @@ custom-layouts/*.json
 !custom-layouts/Main.json
 !custom-layouts/Mixed Example.json
 
+# Layout UI runtime state (last opened preset)
+.layout-ui-state.json
+
 # PyInstaller build output
 build/
 LayoutUI.exe
