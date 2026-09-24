@@ -84,7 +84,7 @@ CODEX_MODELS = [
 # Pi: --model takes a bare id or "provider/id" (see `pi --list-models`); both the
 # openai-codex GPT models and OpenRouter ids are reachable from the same flag.
 PI_MODELS = [
-    "", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna-pro",
+    "", "gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna-pro",
     "openrouter/tencent/hy4-preview",
 ]
 MODELS_BY_AGENT = {"claude": CLAUDE_MODELS, "codex": CODEX_MODELS, "pi": PI_MODELS}

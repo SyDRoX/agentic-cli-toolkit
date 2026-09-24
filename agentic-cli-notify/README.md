@@ -28,7 +28,7 @@ Every supported agent maps its own lifecycle events onto the same two actions:
 | Claude Code | `Stop` | `UserPromptSubmit` | `~/.claude/settings.json` hooks |
 | Codex | `Stop` | `UserPromptSubmit` | `$CODEX_HOME/hooks.json` -> `codex-hook.ps1` |
 | Cursor Agent | `stop` | `beforeSubmitPrompt` | `~/.cursor/hooks.json` -> `cursor-hook.ps1` |
-| pi | `agent_settled`, `ui_prompt_start` | `session_start`, `before_agent_start` | `~/.pi/agent/extensions/agentic-cli-notify.ts` |
+| pi | `agent_settled`, `ui_prompt_start` (only while a user-started turn is running, and not after an abort) | `session_start`, `before_agent_start`, `ui_prompt_end` | `~/.pi/agent/extensions/agentic-cli-notify.ts` |
 
 Each session is isolated by its `WT_SESSION` environment variable, so notifications always target the correct window and tab.
 
