@@ -37,6 +37,15 @@ powershell -ExecutionPolicy Bypass -File .\ps1-scripts\Invoke-CustomLayout.ps1 `
 Remove `-DryRun` to launch Windows Terminal. Window slot numbers are persisted
 in presets because they identify the session namespace used for resume.
 
+### Hotkey
+
+Bind Ctrl+Alt+D to the composer, or to one preset launched without the UI:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\ps1-scripts\Setup-DevLayoutShortcut.ps1                    # opens LayoutUI
+powershell -ExecutionPolicy Bypass -File .\ps1-scripts\Setup-DevLayoutShortcut.ps1 -Preset DevLayout  # launches custom-layouts\DevLayout.json
+```
+
 ## Session resume
 
 The toolkit gives each window/tab position a deterministic session slot and

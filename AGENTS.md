@@ -16,7 +16,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 | Session resume | `ps1-scripts/SessionSlot.ps1`, `hooks/devlayout-session-save.ps1`, `register-session-hook.js` | Claude only. Install via `ps1-scripts/Setup-DevLayout.ps1`. Dry-run via `ps1-scripts/Test-Resume.ps1`. |
 | Notifications | `agentic-cli-notify/` | Taskbar flash + WPF popup per WT tab. Own docs: `agentic-cli-notify/README.md`, `agentic-cli-notify/CLAUDE.md`. |
 | Explorer menu | `ps1-scripts/LLM_ContextMenu_Toggle.ps1` + `LLM_ContextMenu.config.yaml` | "Open LLM CLI here" registry menu. YAML drives entries, toggles, defaults. Re-run script after YAML edits. |
-| Hotkey shortcut | `ps1-scripts/Setup-DevLayoutShortcut.ps1 [-Desktop]` | Ctrl+Alt+D Start Menu shortcut to `LayoutUI.bat`. |
+| Hotkey shortcut | `ps1-scripts/Setup-DevLayoutShortcut.ps1 [-Preset <name-or-path>] [-Desktop]` | Ctrl+Alt+D Start Menu shortcut. Opens `LayoutUI.bat`, or with `-Preset` launches that layout via `Invoke-CustomLayout.ps1` (no UI). |
 
 ## Layout JSON schema
 
