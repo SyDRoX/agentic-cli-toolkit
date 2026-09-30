@@ -11,7 +11,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 | Layout composer UI | `LayoutUI.bat` -> `layout_ui.py` | Python 3 + customtkinter. Edits/launches JSON presets in `custom-layouts/`. Work directories in `repos.json`. Theme tokens in `ui_theme.py`. Last opened preset is stored in `.layout-ui-state.json` beside the script/exe and reopened on the next start. |
 | Standalone exe | `Build-LayoutUI.ps1` + `LayoutUI.spec` | PyInstaller onefile to repo root. Exe reads `custom-layouts/`, `repos.json`, `ps1-scripts/` from its own folder; none bundled. |
 | Layout launcher | `ps1-scripts/Invoke-CustomLayout.ps1 -ConfigPath <json> [-DryRun]` | One `Invoke-LayoutWindow` call per window. Maps `agent` key to launcher. |
-| Layout engine | `ps1-scripts/LayoutEngine.ps1` | Dot-sourced. Opens one WT window, one tab per repo, maximized on target monitor. Win32 plumbing lives here. |
+| Layout engine | `ps1-scripts/LayoutEngine.ps1` | Dot-sourced. Opens one WT window, one tab per repo, maximized or snapped left/right on target monitor. Win32 plumbing lives here. |
 | Per-agent launchers | `launchers/launch-{claude,codex,pi,agent}.ps1` | Positional args: TabIndex, Label, WindowNum, Model, Effort, ContextWindow. Run inside the tab's working dir. |
 | Session resume | `ps1-scripts/SessionSlot.ps1`, `hooks/devlayout-session-save.ps1`, `register-session-hook.js` | Claude only. Install via `ps1-scripts/Setup-DevLayout.ps1`. Dry-run via `ps1-scripts/Test-Resume.ps1`. |
 | Notifications | `agentic-cli-notify/` | Taskbar flash + WPF popup per WT tab. Own docs: `agentic-cli-notify/README.md`, `agentic-cli-notify/CLAUDE.md`. |
@@ -25,7 +25,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
   "name": "Main",
   "windows": [
     {
-      "name": "label", "windowNum": 102, "targetMonitor": 0,
+      "name": "label", "windowNum": 102, "targetMonitor": 0, "position": "maximize",
       "tabs": [
         { "title": "T1", "workingDir": "C:\\Repos\\x", "agent": "pi",
           "model": "openrouter/tencent/hy4-preview", "effort": "medium", "contextWindow": "0.25m" }
@@ -35,6 +35,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 }
 ```
 
+- `position`: `maximize` (default) | `left` | `right`. Left/right snap the window to that half of `targetMonitor` via Win+Arrow. Not editable in the UI yet; the UI preserves it on save.
 - `agent`: `claude` | `codex` | `pi` | `cursor` (alias `agent`). Case-insensitive.
 - `model`, `effort`, `contextWindow` optional; empty = CLI default. Cursor ignores all three.
 - `effort`: `low|medium|high|xhigh|max`. Claude `--effort`, Codex `model_reasoning_effort`, pi `--thinking`.
@@ -50,6 +51,8 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 - **Codex/pi/Cursor resume is per working dir** (`codex resume --last`, `pi --continue`, `agent --continue --workspace`). No slot logic.
 - **Pi context window is a per-tab config overlay.** pi reads `modelOverrides` only from `<config dir>/models.json`, and that file is global, so writing it from every tab makes the last tab launched win for all of them. `launch-pi.ps1` therefore points `PI_CODING_AGENT_DIR` at `~/.pi/devlayout/w<N>-t<M>`, an overlay rebuilt on every launch that holds its own `models.json` and shares the rest of `~/.pi/agent` - `bin`, `extensions`, `npm`, `themes`, `tools`, `prompts`, `sessions` as NTFS junctions; `auth.json`, `models-store.json`, `settings.json`, `statusline.json`, `keybindings.json`, `trust.json` as hard links. Hard links are safe because pi rewrites those files in place (`writeFileSync`), never through a temp-file rename; if that changes upstream, the overlay would go stale and the shared files must be junctioned or copied instead. `trust.json` is seeded as `{}` in the global directory so a `/trust` decision persists there. Sessions stay global through the `sessions` junction: pi stores a session in `<config dir>\sessions\--<cwd with separators replaced>--`, so junctioning that directory keeps one store and keeps `pi --continue` per working dir. Never set `PI_CODING_AGENT_SESSION_DIR` instead - it names the exact session directory, which drops pi's per-working-dir split and makes every tab resume the session written last in any repo. Tabs on `contextWindow: "default"`, or whose value equals the model's catalog window, get no overlay and no env vars. Never write `~/.pi/agent/models.json` from a launcher.
 - Launchers clear inherited `CLAUDECODE` env to avoid nested-session error.
+- `Invoke-CustomLayout.ps1` strips agent-session env (`CLAUDE_CODE_CHILD_SESSION`, `NO_COLOR`, ...) before calling wt.exe, because wt.exe passes the caller's env to new tabs. Launched from inside Claude Code, tabs otherwise lose color and transcript saving. Vars set at User/Machine scope are kept.
+- Never put `;` inside a tab command: wt.exe splits on it as a tab separator.
 - `register-session-hook.js` edits only its own key in `~/.claude/settings.json`. Do not replace with a PowerShell JSON round-trip (needs PS 6+, reformats file).
 - Notification state keyed by `WT_SESSION`. Hooks outside Windows Terminal are ignored.
 
