@@ -19,6 +19,16 @@ param(
     [switch]$DryRun
 )
 
+# The hotkey runs this hidden, so a failure is only visible in this log.
+$launchLogDir = Join-Path $env:USERPROFILE ".claude\dev-layout"
+if (-not (Test-Path $launchLogDir)) { New-Item -ItemType Directory -Path $launchLogDir -Force | Out-Null }
+Start-Transcript -Path (Join-Path $launchLogDir "last-launch.log") -Force | Out-Null
+trap {
+    Write-Host "FATAL: $_`n$($_.ScriptStackTrace)"
+    Stop-Transcript | Out-Null
+    exit 1
+}
+
 . (Join-Path $PSScriptRoot "LayoutEngine.ps1")
 
 # wt.exe hands the caller's environment to the tabs it opens. Launched from inside
@@ -113,3 +123,4 @@ foreach ($win in $config.windows) {
 }
 
 Write-Host "Custom layout '$presetName': done." -ForegroundColor Green
+Stop-Transcript | Out-Null
