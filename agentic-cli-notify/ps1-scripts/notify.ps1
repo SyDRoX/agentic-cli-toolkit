@@ -17,6 +17,37 @@ $tabIndexFile = "$stateDir\.tabindex-$sessionId"
 $popupScript = "$stateDir\popup.ps1"
 $slotDir = "$stateDir\.slots"
 
+# Only Claude pipes its hook JSON in; pi leaves stdin open, so reading it there would hang.
+$hookInput = $null
+if ($Agent -eq 'Claude' -and [Console]::IsInputRedirected) {
+    try { $hookInput = [Console]::In.ReadToEnd() | ConvertFrom-Json } catch { }
+}
+
+function Test-AsyncAgentRunning($hookInput) {
+    if (-not $hookInput -or -not $hookInput.transcript_path) { return $false }
+    $path = [string]$hookInput.transcript_path
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+
+    $stream = [System.IO.File]::Open($path, 'Open', 'Read', 'ReadWrite')
+    try {
+        $text = (New-Object System.IO.StreamReader($stream)).ReadToEnd()
+    } finally {
+        $stream.Dispose()
+    }
+
+    $finished = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($m in [regex]::Matches($text, '<task-id>([A-Za-z0-9]+)</task-id>')) {
+        $null = $finished.Add($m.Groups[1].Value)
+    }
+
+    # Background Bash is ignored: a server that never exits would mute every later Stop.
+    foreach ($m in [regex]::Matches($text, '"isAsync":true[^{}]*?"agentId":"([A-Za-z0-9]+)"')) {
+        if (-not $finished.Contains($m.Groups[1].Value)) { return $true }
+    }
+
+    return $false
+}
+
 Add-Type -TypeDefinition @"
 using System;
 using System.Collections.Generic;
@@ -78,7 +109,12 @@ try {
             #
             # save-hwnd.exe writes .hwnd-<id> / .tabindex-<id> directly when
             # given the session id, so concurrent tabs never race.
-            if ($sessionId -ne "default") {
+            #
+            # A finished background agent also fires UserPromptSubmit, with a
+            # <task-notification> prompt and nobody typing - the foreground tab
+            # is then some other session's, so re-capturing would steal it.
+            $isTaskNotification = $hookInput -and "$($hookInput.prompt)".TrimStart().StartsWith('<task-notification>')
+            if ($sessionId -ne "default" -and -not $isTaskNotification) {
                 $saveHwnd = "$stateDir\save-hwnd.exe"
                 if (Test-Path $saveHwnd) {
                     try { & $saveHwnd $sessionId 2>$null | Out-Null } catch { }
@@ -113,6 +149,11 @@ try {
             Remove-Item $dismissFile -Force -ErrorAction SilentlyContinue
         }
         "attention" {
+            # Stop also fires when a turn ends with agents still working in the background.
+            $isAgentRunning = $false
+            try { $isAgentRunning = Test-AsyncAgentRunning $hookInput } catch { }
+            if ($isAgentRunning) { exit 0 }
+
             # Read saved HWND for this session
             $hwnd = [IntPtr]::Zero
             if (Test-Path $hwndFile) {

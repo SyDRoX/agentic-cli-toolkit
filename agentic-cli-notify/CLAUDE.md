@@ -8,10 +8,20 @@ Hooks (cmd.exe) -> notify.ps1 (PowerShell) -> popup.ps1 (WPF)
 
 - `attention.cmd` / `resume.cmd` are thin cmd.exe wrappers required because Claude Code hooks run via cmd.exe on Windows
 - Every agent maps onto the same two actions (`attention`, `resume`) through its own adapter:
-  - Claude Code: `attention.cmd` / `resume.cmd` from `~/.claude/settings.json`
+  - Claude Code: `attention.cmd` / `resume.cmd` from `~/.claude/settings.json`. `notify.ps1` reads the hook JSON from stdin (Claude only). A finished
+    background agent fires `UserPromptSubmit` with a `<task-notification>` prompt while the user is in another tab, so `resume` skips the hwnd/tab
+    re-capture for it. `Stop` also fires when a turn ends with async agents still running, so `attention` stays silent while any transcript
+    `"isAsync":true` agentId has no matching `<task-id>` notification. Background Bash is not counted: a server that never exits would mute every
+    later Stop.
   - Codex: `codex-hook.ps1` from `$CODEX_HOME/hooks.json` (event read from the stdin payload)
-  - Cursor Agent: `cursor-hook.ps1` from `~/.cursor/hooks.json`, events `stop` and `beforeSubmitPrompt`; the event is passed as `-Action` because the payload field name differs between Cursor versions
-  - pi: `pi-extension/agentic-cli-notify.ts`, installed to `~/.pi/agent/extensions/`, on `agent_settled` / `ui_prompt_start` (attention) and `session_start` / `before_agent_start` / `ui_prompt_end` (resume). Attention is gated on a turn the user started: the extension arms on `before_agent_start` and disarms on `agent_settled`, so pi's own startup dialogs (project trust, pickers) raise nothing. A turn the user aborted with escape sends `resume`, not `attention` - `agent_settled` carries no outcome, so the stop reason is read from `message_end`. Spawn the notifier without `detached`: DETACHED_PROCESS gives powershell.exe no console and it exits 0 without running the script. Use `windowsHide` so the child gets its own hidden console and does not rename the WT tab.
+  - Cursor Agent: `cursor-hook.ps1` from `~/.cursor/hooks.json`, events `stop` and `beforeSubmitPrompt`; the event is passed as `-Action` because the
+    payload field name differs between Cursor versions
+  - pi: `pi-extension/agentic-cli-notify.ts`, installed to `~/.pi/agent/extensions/`, on `agent_settled` / `ui_prompt_start` (attention) and
+    `session_start` / `before_agent_start` / `ui_prompt_end` (resume). Attention is gated on a turn the user started: the extension arms on
+    `before_agent_start` and disarms on `agent_settled`, so pi's own startup dialogs (project trust, pickers) raise nothing. A turn the user aborted
+    with escape sends `resume`, not `attention` - `agent_settled` carries no outcome, so the stop reason is read from `message_end`. Spawn the
+    notifier without `detached`: DETACHED_PROCESS gives powershell.exe no console and it exits 0 without running the script. Use `windowsHide` so the
+    child gets its own hidden console and does not rename the WT tab.
 - `notify.ps1 -Agent` accepts `Claude`, `Codex`, `Pi`, `Cursor`; the value is only a popup title
 - `notify.ps1` is the dispatcher: flashes the taskbar, launches/kills popup processes
 - `popup.ps1` is a standalone WPF window launched as a separate PowerShell process with `-STA` flag
@@ -36,7 +46,8 @@ All runtime state is in `~/.claude/hooks/agentic-cli-notify/`, keyed by `WT_SESS
 - `.hwnd-{session}` - Window handle
 - `.tabindex-{session}` - Tab position (1-based)
 - `.popup-{session}.pid` - Active popup PID
-- `.slots/{screen}-{pid}.slot` - Stack slot claim per live popup, holding `<claimTicks>|<height>`. Popups stack by claim order and reflow down when a lower popup closes; claims of dead processes are purged on the next poll.
+- `.slots/{screen}-{pid}.slot` - Stack slot claim per live popup, holding `<claimTicks>|<height>`. Popups stack by claim order and reflow down when a
+  lower popup closes; claims of dead processes are purged on the next poll.
 
 ## Building
 
