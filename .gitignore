@@ -13,6 +13,9 @@ custom-layouts/*.json
 # Layout UI runtime state (last opened preset)
 .layout-ui-state.json
 
+# Live model lists cached by model_catalog.py
+.model-cache.json
+
 # PyInstaller build output
 build/
 LayoutUI.exe

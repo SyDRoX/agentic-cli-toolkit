@@ -41,7 +41,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 - `effort`: `low|medium|high|xhigh|max`. Claude `--effort`, Codex `model_reasoning_effort`, pi `--thinking`.
 - `contextWindow`: Claude only `default[1m]`; Codex `default|0.25m|0.5m|MAX`; pi `default|0.25m|0.5m|1m|MAX`. Pi has no flag, so `launch-pi.ps1` writes `modelOverrides.contextWindow` into a per-tab config directory (see below).
 - Pi `MAX` means the selected model's catalog window from `~/.pi/agent/models-store.json`. For the OpenAI GPT-5.6 models that catalog value is pi's short-context-pricing default (272000), not the provider ceiling, so `MAX` is a no-op there and `1m` is what opts them into the long-context window. Verify any change with `pi --list-models <id>`, which prints the effective window.
-- Model/effort/context option lists live in `layout_ui.py` constants (`CLAUDE_MODELS`, `CODEX_MODELS`, `PI_MODELS`, ...).
+- Model lists are live: `model_catalog.py` reads Claude `/v1/models` (`ANTHROPIC_API_KEY`, else the Claude Code OAuth token), Codex `~/.codex/models_cache.json` and pi `~/.pi/agent/models-store.json`, caches them in `.model-cache.json` beside the script/exe for 24h, and falls back to the cache of any age, then to the `CLAUDE_MODELS` / `CODEX_MODELS` / `PI_MODELS` constants in `layout_ui.py`. The UI starts on the cache, refreshes in a background thread, and has a "Refresh models" button that bypasses the TTL. Effort/context lists are still constants. Tests: `python -m unittest discover -s tests`.
 
 ## Invariants (do not break)
 
@@ -63,8 +63,8 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 - No emojis in code or scripts.
 - Scripts resolve paths from `$PSScriptRoot` / `$MyInvocation`; never hardcode user or checkout paths.
 - Non-interactive scripts: no `Read-Host`; take switches instead.
-- Python: `layout_ui.py` single-file UI; colors only via `ui_theme.resolve_color()`; unknown role raises.
-- Gitignored runtime output: `LayoutUI.exe`, `build/`, `__pycache__/`, user presets in `custom-layouts/` (except `Main.json`, `Mixed Example.json`), notify state files (`.hwnd-*`, `.tabindex-*`, `.popup-*.pid`, `.slots/`, `save-hwnd.exe`).
+- Python: `layout_ui.py` single-file UI (`model_catalog.py` stays UI-free); colors only via `ui_theme.resolve_color()`; unknown role raises.
+- Gitignored runtime output: `LayoutUI.exe`, `build/`, `__pycache__/`, `.model-cache.json`, user presets in `custom-layouts/` (except `Main.json`, `Mixed Example.json`), notify state files (`.hwnd-*`, `.tabindex-*`, `.popup-*.pid`, `.slots/`, `save-hwnd.exe`).
 
 ## Common commands
 

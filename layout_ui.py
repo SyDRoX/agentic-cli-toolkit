@@ -10,12 +10,14 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 
+import model_catalog
 from ui_theme import (
     FONT_BODY,
     FONT_LABEL,
@@ -49,6 +51,8 @@ INVOKE_PS1 = ROOT / "ps1-scripts" / "Invoke-CustomLayout.ps1"
 # Small runtime state beside the exe: which preset was open last, so the next
 # start reopens it instead of an empty "Untitled".
 UI_STATE_FILE = ROOT / ".layout-ui-state.json"
+# Live model lists fetched from each CLI's catalog; see model_catalog.py.
+MODEL_CACHE_FILE = ROOT / ".model-cache.json"
 SLOT_START = 100
 
 DEFAULT_REPOS = [
@@ -71,6 +75,7 @@ AGENT_BY_KEY = {key: label for label, key in AGENTS}
 AGENT_BY_LABEL = {label: key for label, key in AGENTS}
 
 # Model choices per agent (editable combos - typing a value not listed is fine).
+# Fallback only: the UI shows the live lists from model_catalog when it can reach them.
 # Claude: --model accepts these aliases or a full model id (see `claude --help`).
 CLAUDE_MODELS = [
     "", "opus", "sonnet", "fable",
@@ -298,10 +303,16 @@ class LayoutUI(ctk.CTk):
         self.current_window_index: int | None = None
         self._preset_path: Path | None = None
         self._cell_editor: any = None
+        self.models_by_agent = model_catalog.resolve_models(
+            MODEL_CACHE_FILE, MODELS_BY_AGENT, is_offline=True
+        )
+        self._model_fetch: threading.Thread | None = None
+        self._fetched_models: dict[str, list[str]] | None = None
 
         self._build()
         self._restore_last_preset()
         self._refresh_preset_list()
+        self._refresh_models()
 
     # --- themed widget factories ----------------------------------------
 
@@ -419,6 +430,10 @@ class LayoutUI(ctk.CTk):
         self._button(top, "Work Directories", self._manage_repos, width=130).pack(
             side=tk.LEFT, padx=(12, 2)
         )
+        self.refresh_models_button = self._button(
+            top, "Refresh models", lambda: self._refresh_models(is_forced=True), width=120
+        )
+        self.refresh_models_button.pack(side=tk.LEFT, padx=2)
         self._button(top, "Launch", self._launch, accent=True).pack(side=tk.RIGHT, padx=2)
         self._button(top, "Dry run", lambda: self._launch(dry_run=True)).pack(side=tk.RIGHT, padx=2)
 
@@ -508,6 +523,33 @@ class LayoutUI(ctk.CTk):
             text_color=resolve_color("dim", self.mode),
         )
         hint.pack(fill=tk.X, padx=8, pady=8)
+
+    # --- model lists -----------------------------------------------------
+
+    def _refresh_models(self, is_forced: bool = False) -> None:
+        if self._model_fetch and self._model_fetch.is_alive():
+            return
+
+        def work() -> None:
+            self._fetched_models = model_catalog.resolve_models(
+                MODEL_CACHE_FILE, MODELS_BY_AGENT, is_forced=is_forced
+            )
+
+        self.refresh_models_button.configure(text="Refreshing...", state="disabled")
+        self._model_fetch = threading.Thread(target=work, daemon=True)
+        self._model_fetch.start()
+        self.after(200, self._poll_models)
+
+    def _poll_models(self) -> None:
+        # Tk is not thread-safe, so the worker only hands its result over and the Tk thread applies it.
+        if self._model_fetch and self._model_fetch.is_alive():
+            self.after(200, self._poll_models)
+            return
+
+        if self._fetched_models:
+            self.models_by_agent = self._fetched_models
+            self._fetched_models = None
+        self.refresh_models_button.configure(text="Refresh models", state="normal")
 
     # --- modal helpers ---------------------------------------------------
 
@@ -1016,7 +1058,7 @@ class LayoutUI(ctk.CTk):
             )
             widget.bind("<FocusOut>", lambda _e: self._end_cell_edit())
         elif col_name == "model":
-            values = MODELS_BY_AGENT.get(agent_key, CLAUDE_MODELS)
+            values = self.models_by_agent.get(agent_key, self.models_by_agent["claude"])
             var = tk.StringVar(value=tab.get("model", ""))
             widget = self._combo(tree, var, values, width=w)
             widget.bind("<Return>", lambda _e: commit(var.get().strip()))
