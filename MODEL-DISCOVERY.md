@@ -5,6 +5,8 @@ every time a model ships. Each CLI already exposes its own live catalog; read th
 
 **Status: implemented 2026-10-01** in `model_catalog.py` + `layout_ui.py`, tests in `tests/test_model_catalog.py`.
 Deviation: pi reads `~/.pi/agent/models-store.json` instead of `pi --list-models` (see the Pi row).
+Added after: the dropdown shows only 10 entries (last-used first, then catalog order) and typing searches the full
+catalog, because the pi store can hold hundreds of OpenRouter models.
 
 ## Sources (verified 2026-09-30 on this machine)
 
@@ -12,7 +14,7 @@ Deviation: pi reads `~/.pi/agent/models-store.json` instead of `pi --list-models
 |-------|--------|-------|
 | Claude | `GET https://api.anthropic.com/v1/models?limit=100` | Auth: `x-api-key: $ANTHROPIC_API_KEY` if set; else `Authorization: Bearer <claudeAiOauth.accessToken>` from `~/.claude/.credentials.json` plus header `anthropic-beta: oauth-2025-04-20`. Also send `anthropic-version: 2023-06-01`. Returned 13 ids, newest first, account-scoped (includes `claude-opus-5-5`, `claude-sonnet-5-5`). |
 | Codex | `~/.codex/models_cache.json` (read as UTF-8) | `{fetched_at, etag, client_version, models:[...]}`. Keep `visibility == "list"`, sort by `priority`. Each entry has `slug`, `display_name`, `context_window`, `max_context_window`, `supported_reasoning_levels` - can also drive the context/effort combos. Codex refreshes the file itself. |
-| Pi | `~/.pi/agent/models-store.json` | `{<provider>: {models: [{id, ...}]}}`, the shape `launch-pi.ps1` already parses. Ids are bare unless several providers share one, then `provider/id`. Chosen over `pi --list-models`, whose output was unverifiable (pi not installed here). Unverified against a real store: confirm the dropdown size on a pi machine. |
+| Pi | `~/.pi/agent/models-store.json` | `{<provider>: {models: [{id, ...}]}}`, the shape `launch-pi.ps1` already parses. Ids are bare unless several providers share one, then `provider/id`. Chosen over `pi --list-models`, whose output was unverifiable (pi not installed here). Unverified against a real store: confirm the provider names match the `anthropic` / `openai` prefixes on a pi machine. |
 
 Rejected: scraping model ids out of the `claude` binary (`grep -a -o '"claude-...'`). Instant and offline, but returns retired ids
 (`claude-sonnet-3-7`) and depends on binary layout.

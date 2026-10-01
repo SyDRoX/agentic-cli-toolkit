@@ -18,6 +18,10 @@ CLAUDE_ALIASES = ["opus", "sonnet", "fable"]
 CLAUDE_CREDENTIALS = Path.home() / ".claude" / ".credentials.json"
 CODEX_CACHE = Path.home() / ".codex" / "models_cache.json"
 PI_STORE = Path.home() / ".pi" / "agent" / "models-store.json"
+# Dropdowns show this many; the full catalog stays reachable by typing.
+TOP_LIMIT = 10
+RECENT_LIMIT = 5
+PI_PROVIDER_PRIORITY = ["anthropic", "openai"]
 
 
 def parse_claude_models(payload: dict) -> list[str]:
@@ -61,10 +65,19 @@ def fetch_codex(path: Path = CODEX_CACHE) -> list[str]:
     return parse_codex_cache(json.loads(path.read_text(encoding="utf-8")))
 
 
+def _provider_rank(provider: str) -> int:
+    for rank, prefix in enumerate(PI_PROVIDER_PRIORITY):
+        if provider.lower().startswith(prefix):
+            return rank
+    return len(PI_PROVIDER_PRIORITY)
+
+
 def parse_pi_store(store: dict) -> list[str]:
+    providers = sorted(store, key=_provider_rank)
     pairs = [
         (provider, m["id"])
-        for provider, entry in store.items()
+        for provider in providers
+        for entry in [store[provider]]
         if isinstance(entry, dict)
         for m in entry.get("models", [])
         if isinstance(m, dict) and m.get("id")
@@ -88,6 +101,34 @@ FETCHERS: dict[str, Callable[[], list[str]]] = {
     "codex": fetch_codex,
     "pi": fetch_pi,
 }
+
+
+def _merged(models: list[str], recent: list[str] | None) -> list[str]:
+    # Recent picks may be typed ids the catalog lacks; they still belong in the list.
+    return list(dict.fromkeys(m for m in (recent or []) + models if m))
+
+
+def top_models(models: list[str], limit: int = TOP_LIMIT, recent: list[str] | None = None) -> list[str]:
+    """Leading "" (CLI default), then recent picks, then catalog order (newest/preferred first)."""
+    return [""] + _merged(models, recent)[:limit]
+
+
+def filter_models(
+    models: list[str], query: str, limit: int = TOP_LIMIT, recent: list[str] | None = None
+) -> list[str]:
+    """Entries containing every word of `query`, case-insensitive; prefix matches first."""
+    words = query.lower().split()
+    if not words:
+        return top_models(models, limit, recent)
+    hits = [m for m in _merged(models, recent) if all(w in m.lower() for w in words)]
+    hits.sort(key=lambda m: not m.lower().startswith(words[0]))
+    return hits[:limit]
+
+
+def remember_model(recent: list[str], model: str, limit: int = RECENT_LIMIT) -> list[str]:
+    if not model:
+        return recent
+    return ([model] + [m for m in recent if m != model])[:limit]
 
 
 def _load_cache(path: Path) -> dict:

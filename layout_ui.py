@@ -186,27 +186,45 @@ def slot_owners(exclude: Path | None = None) -> dict[int, list[str]]:
     return owners
 
 
-def load_last_preset() -> str | None:
+def load_ui_state() -> dict:
     try:
         data = json.loads(UI_STATE_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None
-    name = data.get("lastPreset") if isinstance(data, dict) else None
-    return str(name) if name else None
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
-def save_last_preset(name: str | None) -> None:
-    """Remember the preset to reopen next start. Never fatal: the UI works without it."""
+def save_ui_state(key: str, value: any) -> None:
+    """Set or (with a falsy value) drop one key. Never fatal: the UI works without it."""
+    data = load_ui_state()
+    if value:
+        data[key] = value
+    else:
+        data.pop(key, None)
     try:
-        if name:
-            UI_STATE_FILE.write_text(
-                json.dumps({"lastPreset": name}, indent=2) + "\n",
-                encoding="utf-8",
-            )
+        if data:
+            UI_STATE_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         elif UI_STATE_FILE.exists():
             UI_STATE_FILE.unlink()
     except OSError:
         pass
+
+
+def load_last_preset() -> str | None:
+    name = load_ui_state().get("lastPreset")
+    return str(name) if name else None
+
+
+def save_last_preset(name: str | None) -> None:
+    """Remember the preset to reopen next start."""
+    save_ui_state("lastPreset", name)
+
+
+def load_recent_models() -> dict[str, list[str]]:
+    recent = load_ui_state().get("recentModels")
+    if not isinstance(recent, dict):
+        return {}
+    return {k: [m for m in v if isinstance(m, str)] for k, v in recent.items() if isinstance(v, list)}
 
 
 class Spinbox(ctk.CTkFrame):
@@ -308,6 +326,7 @@ class LayoutUI(ctk.CTk):
         )
         self._model_fetch: threading.Thread | None = None
         self._fetched_models: dict[str, list[str]] | None = None
+        self.recent_models = load_recent_models()
 
         self._build()
         self._restore_last_preset()
@@ -1058,9 +1077,20 @@ class LayoutUI(ctk.CTk):
             )
             widget.bind("<FocusOut>", lambda _e: self._end_cell_edit())
         elif col_name == "model":
-            values = self.models_by_agent.get(agent_key, self.models_by_agent["claude"])
+            catalog = self.models_by_agent.get(agent_key, self.models_by_agent["claude"])
+            recent = self.recent_models.get(agent_key, [])
             var = tk.StringVar(value=tab.get("model", ""))
-            widget = self._combo(tree, var, values, width=w)
+            widget = self._combo(tree, var, model_catalog.top_models(catalog, recent=recent), width=w)
+
+            def on_type(event: tk.Event) -> None:
+                if event.keysym in ("Return", "Escape", "Down", "Up", "Tab"):
+                    return
+                matches = model_catalog.filter_models(catalog, var.get(), recent=recent)
+                widget.configure(values=matches or model_catalog.top_models(catalog, recent=recent))
+
+            widget.bind("<KeyRelease>", on_type)
+            # CTkComboBox has no public way to open its list; Down is the natural key for it.
+            widget.bind("<Down>", lambda _e: widget._open_dropdown_menu())
             widget.bind("<Return>", lambda _e: commit(var.get().strip()))
             widget.bind("<FocusOut>", lambda _e: commit(var.get().strip()))
             widget.bind("<Escape>", lambda _e: self._end_cell_edit())
@@ -1103,6 +1133,12 @@ class LayoutUI(ctk.CTk):
             if value:
                 tab["title"] = value
         else:
+            if col_name == "model" and value and value != tab.get("model"):
+                agent_key = tab.get("agent", "")
+                self.recent_models[agent_key] = model_catalog.remember_model(
+                    self.recent_models.get(agent_key, []), value
+                )
+                save_ui_state("recentModels", self.recent_models)
             tab[col_name] = value
         self._refresh_tabs_tree()
         children = self.tabs_tree.get_children()

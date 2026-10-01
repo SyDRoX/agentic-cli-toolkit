@@ -40,8 +40,9 @@ CODEX_CACHE = {
 
 # Shape read by launchers/launch-pi.ps1 (Get-PiModelInfo): provider -> {models: [{id}]}.
 PI_STORE = {
-    "openai-codex": {"models": [{"id": "gpt-5.6-luna", "contextWindow": 272000}, {"id": "gpt-6-luna"}]},
     "openrouter": {"models": [{"id": "tencent/hy4-preview"}, {"id": "gpt-5.6-luna"}]},
+    "openai-codex": {"models": [{"id": "gpt-5.6-luna", "contextWindow": 272000}, {"id": "gpt-6-luna"}]},
+    "anthropic": {"models": [{"id": "claude-opus-5-5"}]},
 }
 
 FALLBACK = {"claude": ["", "opus"], "codex": ["", "gpt-5.5"], "pi": ["", "gpt-5.6-luna"]}
@@ -67,15 +68,58 @@ class ParserTests(unittest.TestCase):
             model_catalog.parse_codex_cache(CODEX_CACHE), ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"]
         )
 
-    def test_pi_qualifies_only_shared_ids(self) -> None:
+    def test_pi_anthropic_then_openai_first_and_qualifies_only_shared_ids(self) -> None:
         self.assertEqual(
             model_catalog.parse_pi_store(PI_STORE),
-            ["openai-codex/gpt-5.6-luna", "gpt-6-luna", "tencent/hy4-preview", "openrouter/gpt-5.6-luna"],
+            [
+                "claude-opus-5-5",
+                "openai-codex/gpt-5.6-luna",
+                "gpt-6-luna",
+                "tencent/hy4-preview",
+                "openrouter/gpt-5.6-luna",
+            ],
         )
 
     def test_pi_empty_raises(self) -> None:
         with self.assertRaises(ValueError):
             model_catalog.parse_pi_store({"openrouter": {"models": []}})
+
+
+CATALOG = [f"model-{i:02d}" for i in range(30)] + ["claude-opus-5-5", "gpt-5.6-sol-pro"]
+
+
+class ListingTests(unittest.TestCase):
+    def test_top_is_default_plus_ten(self) -> None:
+        top = model_catalog.top_models(CATALOG)
+        self.assertEqual(top[0], "")
+        self.assertEqual(top[1:], CATALOG[:10])
+
+    def test_recent_leads_and_is_deduped(self) -> None:
+        top = model_catalog.top_models(CATALOG, recent=["model-05", "typed-custom"])
+        self.assertEqual(top[:4], ["", "model-05", "typed-custom", "model-00"])
+        self.assertEqual(len(top), 11)
+        self.assertEqual(top.count("model-05"), 1)
+
+    def test_filter_searches_beyond_top_ten(self) -> None:
+        self.assertEqual(model_catalog.filter_models(CATALOG, "opus"), ["claude-opus-5-5"])
+
+    def test_filter_needs_every_word_case_insensitive(self) -> None:
+        self.assertEqual(model_catalog.filter_models(CATALOG, "SOL pro"), ["gpt-5.6-sol-pro"])
+        self.assertEqual(model_catalog.filter_models(CATALOG, "sol opus"), [])
+
+    def test_filter_prefix_matches_first_and_capped(self) -> None:
+        hits = model_catalog.filter_models(["x-model", "model-a"] + CATALOG, "model")
+        self.assertEqual(hits[0], "model-a")
+        self.assertEqual(len(hits), 10)
+
+    def test_filter_blank_query_is_top(self) -> None:
+        self.assertEqual(model_catalog.filter_models(CATALOG, "  "), model_catalog.top_models(CATALOG))
+
+    def test_remember_moves_to_front_and_caps(self) -> None:
+        recent = ["a", "b", "c", "d", "e"]
+        self.assertEqual(model_catalog.remember_model(recent, "c"), ["c", "a", "b", "d", "e"])
+        self.assertEqual(model_catalog.remember_model(recent, "f"), ["f", "a", "b", "c", "d"])
+        self.assertEqual(model_catalog.remember_model(recent, ""), recent)
 
 
 class ResolveTests(unittest.TestCase):
