@@ -6,7 +6,10 @@ param(
     [ValidateSet("Standard", "Admin")]
     [string]$Elevation,
 
-    [string]$ConfigPath = (Join-Path $PSScriptRoot "LLM_ContextMenu.config.yaml"),
+    # Defaults to LLM_ContextMenu.config.yaml beside this script. Resolved in the
+    # body: PowerShell 5.1 leaves $PSScriptRoot empty in an advanced script's
+    # parameter defaults.
+    [string]$ConfigPath,
 
     # These two parameters are used by the installed context-menu commands.
     [string]$LaunchModel,
@@ -14,6 +17,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot "LLM_ContextMenu.config.yaml" }
 
 function Remove-YamlComment {
     param([string]$Text)
@@ -160,6 +165,109 @@ function Import-LLMMenuConfig {
 function Quote-CommandArgument {
     param([string]$Value)
     return '"' + $Value.Replace('"', '\"') + '"'
+}
+
+function Export-ExecutableIcon {
+    param(
+        [string]$ExePath,
+        [string]$Path
+    )
+
+    # Copies the first icon group of a PE file into a standalone ICO with every
+    # size intact. The registry must not point at the Windows Terminal package
+    # directory itself: it is versioned and removed on each Store update.
+    if (-not ("DevLayout.IconExtractor" -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+
+namespace DevLayout {
+    public static class IconExtractor {
+        const uint LOAD_LIBRARY_AS_DATAFILE = 0x2;
+        const uint LOAD_LIBRARY_AS_IMAGE_RESOURCE = 0x20;
+        static readonly IntPtr RT_ICON = (IntPtr)3;
+        static readonly IntPtr RT_GROUP_ICON = (IntPtr)14;
+
+        delegate bool EnumResNameProc(IntPtr module, IntPtr type, IntPtr name, IntPtr param);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern IntPtr LoadLibraryEx(string path, IntPtr file, uint flags);
+        [DllImport("kernel32.dll")]
+        static extern bool FreeLibrary(IntPtr module);
+        [DllImport("kernel32.dll")]
+        static extern bool EnumResourceNames(IntPtr module, IntPtr type, EnumResNameProc callback, IntPtr param);
+        [DllImport("kernel32.dll")]
+        static extern IntPtr FindResource(IntPtr module, IntPtr name, IntPtr type);
+        [DllImport("kernel32.dll")]
+        static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+        [DllImport("kernel32.dll")]
+        static extern IntPtr LockResource(IntPtr data);
+        [DllImport("kernel32.dll")]
+        static extern uint SizeofResource(IntPtr module, IntPtr resource);
+
+        static byte[] ReadResource(IntPtr module, IntPtr name, IntPtr type) {
+            IntPtr info = FindResource(module, name, type);
+            if (info == IntPtr.Zero) return null;
+            uint size = SizeofResource(module, info);
+            IntPtr data = LockResource(LoadResource(module, info));
+            if (data == IntPtr.Zero || size == 0) return null;
+            byte[] bytes = new byte[size];
+            Marshal.Copy(data, bytes, 0, (int)size);
+            return bytes;
+        }
+
+        public static bool Export(string exePath, string icoPath) {
+            IntPtr module = LoadLibraryEx(exePath, IntPtr.Zero, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+            if (module == IntPtr.Zero) return false;
+            try {
+                byte[] group = null;
+                EnumResourceNames(module, RT_GROUP_ICON, delegate(IntPtr m, IntPtr t, IntPtr n, IntPtr p) {
+                    group = ReadResource(m, n, t);
+                    return false;
+                }, IntPtr.Zero);
+                if (group == null || group.Length < 6) return false;
+
+                // GRPICONDIR entries are 14 bytes and end with a resource id;
+                // ICONDIR entries are 16 bytes and end with a file offset.
+                int count = BitConverter.ToUInt16(group, 4);
+                byte[][] images = new byte[count][];
+                for (int i = 0; i < count; i++) {
+                    int id = BitConverter.ToUInt16(group, 6 + i * 14 + 12);
+                    images[i] = ReadResource(module, (IntPtr)id, RT_ICON);
+                    if (images[i] == null) return false;
+                }
+
+                using (MemoryStream stream = new MemoryStream())
+                using (BinaryWriter writer = new BinaryWriter(stream)) {
+                    writer.Write((ushort)0);
+                    writer.Write((ushort)1);
+                    writer.Write((ushort)count);
+                    int offset = 6 + count * 16;
+                    for (int i = 0; i < count; i++) {
+                        writer.Write(group, 6 + i * 14, 8);
+                        writer.Write((uint)images[i].Length);
+                        writer.Write((uint)offset);
+                        offset += images[i].Length;
+                    }
+                    for (int i = 0; i < count; i++) writer.Write(images[i]);
+                    File.WriteAllBytes(icoPath, stream.ToArray());
+                }
+                return true;
+            } finally {
+                FreeLibrary(module);
+            }
+        }
+    }
+}
+"@
+    }
+
+    $iconDirectory = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $iconDirectory)) {
+        New-Item -ItemType Directory -Path $iconDirectory -Force | Out-Null
+    }
+    return [DevLayout.IconExtractor]::Export($ExePath, $Path)
 }
 
 function New-RadioMarkerIcon {
@@ -311,10 +419,14 @@ $basePaths = @(
 
 $wtPackage = Get-AppxPackage Microsoft.WindowsTerminal -ErrorAction SilentlyContinue
 $iconPath = "powershell.exe"
+$terminalIconPath = Join-Path $env:LOCALAPPDATA "agentic-cli-toolkit\context-menu-terminal.ico"
 if ($wtPackage -and $wtPackage.InstallLocation) {
     $realWtExe = Join-Path $wtPackage.InstallLocation "wt.exe"
-    if (Test-Path -LiteralPath $realWtExe) { $iconPath = $realWtExe }
+    if ((Test-Path -LiteralPath $realWtExe) -and (Export-ExecutableIcon -ExePath $realWtExe -Path $terminalIconPath)) {
+        $iconPath = $terminalIconPath
+    }
 }
+if ($iconPath -eq "powershell.exe" -and (Test-Path -LiteralPath $terminalIconPath)) { $iconPath = $terminalIconPath }
 
 $scriptPath = $PSCommandPath
 $resolvedConfigPath = [IO.Path]::GetFullPath($ConfigPath)
