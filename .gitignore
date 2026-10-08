@@ -10,8 +10,11 @@ custom-layouts/*.json
 !custom-layouts/Main.json
 !custom-layouts/Mixed Example.json
 
-# Layout UI runtime state (last opened preset)
+# Layout UI runtime state (last opened preset, slot high-water mark), error log,
+# and temp files left by an interrupted atomic write
 .layout-ui-state.json
+layout_ui_error.log
+.*.json.*.tmp
 
 # PyInstaller build output
 build/

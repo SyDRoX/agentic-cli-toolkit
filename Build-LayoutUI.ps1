@@ -33,8 +33,14 @@ if (-not $resolved) {
 $pythonExe = $resolved.Source
 Write-Host "Building with $pythonExe" -ForegroundColor Cyan
 
+# Under "Stop", Windows PowerShell 5.1 turns a native command's stderr into a
+# terminating error even with 2>$null, so a failed import would abort the build
+# instead of reaching the install below. Probe with "Continue" and read the exit code.
+$ErrorActionPreference = "Continue"
 & $pythonExe -c "import customtkinter, PyInstaller" 2>$null
-if ($LASTEXITCODE -ne 0) {
+$probeExit = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($probeExit -ne 0) {
     Write-Host "Installing build dependencies..." -ForegroundColor Yellow
     & $pythonExe -m pip install -r (Join-Path $repoRoot "requirements.txt") -r (Join-Path $repoRoot "requirements-build.txt")
     if ($LASTEXITCODE -ne 0) { throw "Dependency install failed." }

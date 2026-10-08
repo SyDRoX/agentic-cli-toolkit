@@ -7,9 +7,12 @@ Cursor Agent tabs in any combination).
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -50,6 +53,9 @@ INVOKE_PS1 = ROOT / "ps1-scripts" / "Invoke-CustomLayout.ps1"
 # start reopens it instead of an empty "Untitled".
 UI_STATE_FILE = ROOT / ".layout-ui-state.json"
 SLOT_START = 100
+# Launch writes an unnamed layout to <SCRATCH_NAME>.json; it is not a preset and
+# claims no slots.
+SCRATCH_NAME = "_scratch"
 
 DEFAULT_REPOS = [
     ("PS-1", r"C:\Repos\PotatoSandwich"),
@@ -121,7 +127,7 @@ def load_repos() -> list[dict[str, str]]:
     if not REPOS_FILE.exists():
         return [{"label": label, "path": path} for label, path in DEFAULT_REPOS]
     try:
-        data = json.loads(REPOS_FILE.read_text(encoding="utf-8"))
+        data = read_json(REPOS_FILE)
         repos = data.get("repos", []) if isinstance(data, dict) else data if isinstance(data, list) else []
         result = [
             {"label": str(repo["label"]).strip(), "path": str(repo["path"]).strip()}
@@ -129,33 +135,192 @@ def load_repos() -> list[dict[str, str]]:
             if isinstance(repo, dict) and repo.get("label") and repo.get("path")
         ]
         return result or [{"label": label, "path": path} for label, path in DEFAULT_REPOS]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError):
         return [{"label": label, "path": path} for label, path in DEFAULT_REPOS]
 
 
+def scratch_path() -> Path:
+    return PRESETS_DIR / f"{SCRATCH_NAME}.json"
+
+
+def read_json(path: Path) -> any:
+    """Parse a JSON file, tolerating the UTF-8 BOM that PowerShell 5.1 and Notepad write."""
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    """Write via a temp file in the same folder, so a crash never leaves half a file."""
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def same_path(a: Path | None, b: Path | None) -> bool:
+    if a is None or b is None:
+        return False
+    return os.path.normcase(str(a.resolve())) == os.path.normcase(str(b.resolve()))
+
+
+def is_scratch(path: Path | None) -> bool:
+    return same_path(path, scratch_path())
+
+
+def preset_files() -> list[Path]:
+    """Saved presets, minus the scratch file Launch writes for an unnamed layout."""
+    if not PRESETS_DIR.exists():
+        return []
+    return sorted(p for p in PRESETS_DIR.glob("*.json") if not is_scratch(p))
+
+
+def _int_field(value: any) -> int | None:
+    # bool is an int subclass; true/false is never a valid slot or monitor
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def normalize_preset(data: any) -> list[dict]:
+    """Validate a loaded preset and return its windows; raises ValueError naming the defect."""
+    if not isinstance(data, dict):
+        raise ValueError("The preset is not a JSON object.")
+    windows = data.get("windows")
+    windows = [] if windows is None else windows
+    if not isinstance(windows, list):
+        raise ValueError('"windows" must be a list.')
+    result: list[dict] = []
+    for i, win in enumerate(windows, 1):
+        if not isinstance(win, dict):
+            raise ValueError(f"Window {i} is not an object.")
+        num = _int_field(win.get("windowNum"))
+        if num is None:
+            raise ValueError(f"Window {i} needs a whole-number windowNum.")
+        monitor = _int_field(win.get("targetMonitor", 0))
+        if monitor is None:
+            raise ValueError(f"Window {i} has a non-numeric targetMonitor.")
+        tabs = win.get("tabs")
+        tabs = [] if tabs is None else tabs
+        if not isinstance(tabs, list):
+            raise ValueError(f'Window {i}: "tabs" must be a list.')
+        norm_tabs: list[dict] = []
+        for j, tab in enumerate(tabs, 1):
+            if not isinstance(tab, dict):
+                raise ValueError(f"Window {i}, tab {j} is not an object.")
+            agent = str(tab.get("agent") or "").strip().lower()
+            agent = "cursor" if agent == "agent" else agent
+            if agent not in AGENT_BY_KEY:
+                raise ValueError(f"Window {i}, tab {j}: unknown agent {tab.get('agent')!r}.")
+            title = str(tab.get("title") or "").strip()
+            working_dir = str(tab.get("workingDir") or "").strip()
+            if not title or not working_dir:
+                raise ValueError(f"Window {i}, tab {j} needs a title and a workingDir.")
+            norm = dict(tab, title=title, workingDir=working_dir, agent=agent)
+            for key in ("model", "effort", "contextWindow"):
+                if key in norm:
+                    norm[key] = "" if norm[key] is None else str(norm[key])
+            norm_tabs.append(norm)
+        result.append(
+            dict(
+                win,
+                name=str(win.get("name") or f"Terminal {i}"),
+                windowNum=num,
+                targetMonitor=monitor,
+                tabs=norm_tabs,
+            )
+        )
+    return result
+
+
+def _preset_slots(path: Path) -> list[tuple[int, bool]]:
+    """(windowNum, window has a Claude tab) per window; [] for a file that does not parse."""
+    try:
+        data = read_json(path)
+    except (OSError, ValueError):
+        return []
+    windows = data.get("windows") if isinstance(data, dict) else None
+    result: list[tuple[int, bool]] = []
+    for win in windows if isinstance(windows, list) else []:
+        if not isinstance(win, dict):
+            continue
+        num = _int_field(win.get("windowNum"))
+        if num is None:
+            continue
+        tabs = win.get("tabs") if isinstance(win.get("tabs"), list) else []
+        claude = any(
+            isinstance(t, dict) and str(t.get("agent", "")).lower() == "claude" for t in tabs
+        )
+        result.append((num, claude))
+    return result
+
+
+def load_ui_state() -> dict:
+    try:
+        data = read_json(UI_STATE_FILE)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_ui_state(**changes: any) -> None:
+    """Merge keys into the state file (None removes one). Never fatal: the UI works without it."""
+    try:
+        state = load_ui_state()
+        for key, value in changes.items():
+            if value is None:
+                state.pop(key, None)
+            else:
+                state[key] = value
+        write_text_atomic(UI_STATE_FILE, json.dumps(state, indent=2) + "\n")
+    except OSError:
+        pass
+
+
+def load_high_water() -> int:
+    """Highest slot ever saved or launched; slots of deleted presets stay retired."""
+    num = _int_field(load_ui_state().get("maxWindowNum"))
+    return num if num is not None else SLOT_START - 1
+
+
+def record_window_nums(nums: any) -> None:
+    """Raise the persisted high-water mark to cover these slots."""
+    stored = load_high_water()
+    high = max([stored, *(n for n in nums if _int_field(n) is not None)])
+    if high > stored:
+        save_ui_state(maxWindowNum=high)
+
+
 def next_window_num(used: set[int]) -> int:
-    n = SLOT_START
-    while n in used:
-        n += 1
-    return n
+    """Next slot above every slot in use and every slot ever handed out.
+
+    Slots are never reused: a freed number would resume the Claude conversations
+    of whatever preset owned it before.
+    """
+    return max([load_high_water(), SLOT_START - 1, *used]) + 1
 
 
 def collect_used_window_nums(exclude: Path | None = None) -> set[int]:
-    used: set[int] = set()
-    if not PRESETS_DIR.exists():
-        return used
-    for path in PRESETS_DIR.glob("*.json"):
-        if exclude and path.resolve() == exclude.resolve():
+    return {
+        num
+        for path in preset_files()
+        if not same_path(path, exclude)
+        for num, _claude in _preset_slots(path)
+    }
+
+
+def slot_claims(exclude: Path | None = None) -> dict[int, list[tuple[str, bool]]]:
+    """Map each window slot to (preset name, window has a Claude tab) for every claimant."""
+    claims: dict[int, list[tuple[str, bool]]] = {}
+    for path in preset_files():
+        if same_path(path, exclude):
             continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        for win in data.get("windows", []):
-            num = win.get("windowNum")
-            if isinstance(num, int):
-                used.add(num)
-    return used
+        for num, claude in _preset_slots(path):
+            claims.setdefault(num, []).append((path.stem, claude))
+    return claims
 
 
 def slot_owners(exclude: Path | None = None) -> dict[int, list[str]]:
@@ -164,44 +329,19 @@ def slot_owners(exclude: Path | None = None) -> dict[int, list[str]]:
     Used to show, next to the slot field, which other presets a number belongs
     to - sharing a slot between presets makes them share Claude conversations.
     """
-    owners: dict[int, list[str]] = {}
-    if not PRESETS_DIR.exists():
-        return owners
-    for path in sorted(PRESETS_DIR.glob("*.json")):
-        if exclude and path.resolve() == exclude.resolve():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        for win in data.get("windows", []):
-            num = win.get("windowNum")
-            if isinstance(num, int):
-                owners.setdefault(num, []).append(path.stem)
-    return owners
+    return {
+        num: [name for name, _claude in owners] for num, owners in slot_claims(exclude).items()
+    }
 
 
 def load_last_preset() -> str | None:
-    try:
-        data = json.loads(UI_STATE_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    name = data.get("lastPreset") if isinstance(data, dict) else None
+    name = load_ui_state().get("lastPreset")
     return str(name) if name else None
 
 
 def save_last_preset(name: str | None) -> None:
     """Remember the preset to reopen next start. Never fatal: the UI works without it."""
-    try:
-        if name:
-            UI_STATE_FILE.write_text(
-                json.dumps({"lastPreset": name}, indent=2) + "\n",
-                encoding="utf-8",
-            )
-        elif UI_STATE_FILE.exists():
-            UI_STATE_FILE.unlink()
-    except OSError:
-        pass
+    save_ui_state(lastPreset=name or None)
 
 
 class Spinbox(ctk.CTkFrame):
@@ -263,16 +403,21 @@ class Spinbox(ctk.CTkFrame):
 class LayoutUI(ctk.CTk):
     def report_callback_exception(self, exc: any, val: any, tb: any) -> None:
         # windowed (pythonw/exe) builds have no stderr - surface Tk callback errors instead of eating them
-        import datetime
         import traceback
 
         text = "".join(traceback.format_exception(exc, val, tb))
+        self._log_error(text)
+        messagebox.showerror("Unhandled error", text, parent=self)
+
+    @staticmethod
+    def _log_error(text: str) -> None:
+        import datetime
+
         try:
             with open(ROOT / "layout_ui_error.log", "a", encoding="utf-8") as f:
                 f.write(f"--- {datetime.datetime.now().isoformat()} ---\n{text}\n")
         except OSError:
             pass
-        messagebox.showerror("Unhandled error", text, parent=self)
 
     def __init__(self) -> None:
         super().__init__()
@@ -300,7 +445,16 @@ class LayoutUI(ctk.CTk):
         self._cell_editor: any = None
 
         self._build()
-        self._restore_last_preset()
+        # Seed the slot high-water mark from presets that predate it.
+        record_window_nums(collect_used_window_nums())
+        try:
+            self._restore_last_preset()
+        except Exception:
+            # A preset that breaks the editor must not stop the app from ever starting.
+            import traceback
+
+            self._log_error(traceback.format_exc())
+            self._new_preset(initial=True)
         self._refresh_preset_list()
 
     # --- themed widget factories ----------------------------------------
@@ -535,8 +689,7 @@ class LayoutUI(ctk.CTk):
         name = load_last_preset()
         if name:
             path = PRESETS_DIR / f"{name}.json"
-            if path.exists():
-                self._load_preset_path(path)
+            if path.exists() and self._load_preset_path(path):
                 self.preset_combo.set(name)
                 return
         self._new_preset(initial=True)
@@ -567,7 +720,7 @@ class LayoutUI(ctk.CTk):
         self.slot_hint.configure(text=text, text_color=resolve_color(role, self.mode))
 
     def _refresh_preset_list(self) -> None:
-        names = sorted(p.stem for p in PRESETS_DIR.glob("*.json"))
+        names = [p.stem for p in preset_files()]
         current = self.preset_var.get()
         self.preset_combo.configure(values=names or [""])
         self.preset_var.set(current)
@@ -604,24 +757,24 @@ class LayoutUI(ctk.CTk):
     def _load_selected_preset(self) -> None:
         """Load the preset selected in the dropdown."""
         name = self.preset_var.get().strip()
-        if name:
-            self._load_preset_path(PRESETS_DIR / f"{name}.json")
+        if name and not self._load_preset_path(PRESETS_DIR / f"{name}.json"):
+            # Keep showing the preset still in the editor, so Save cannot write it
+            # over the file that failed to load.
+            current = self._preset_path
+            self.preset_var.set(current.stem if current and not is_scratch(current) else "Untitled")
 
-    def _load_preset_path(self, path: Path) -> None:
+    def _load_preset_path(self, path: Path) -> bool:
+        """Load a preset into the editor; on any defect leave the editor untouched."""
         if not path.exists():
             messagebox.showerror("Missing preset", f"No file: {path}")
-            return
+            return False
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            messagebox.showerror("Bad preset", str(exc))
-            return
-        self._preset_path = path
-        self.preset_var.set(path.stem)
-        save_last_preset(path.stem)
-        self.windows = data.get("windows") or []
-        if not self.windows:
-            self.windows = [
+            windows = normalize_preset(read_json(path))
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Bad preset", f"{path}\n\n{exc}")
+            return False
+        if not windows:
+            windows = [
                 {
                     "name": "Terminal 1",
                     "windowNum": next_window_num(collect_used_window_nums(path)),
@@ -629,15 +782,133 @@ class LayoutUI(ctk.CTk):
                     "tabs": [],
                 }
             ]
+        self._preset_path = path
+        self.preset_var.set(path.stem)
+        self.windows = windows
         self.current_window_index = 0
         self._refresh_window_list()
         self._load_window_into_form(0)
+        save_last_preset(path.stem)
+        return True
 
-    def _save_preset(self) -> None:
-        self._apply_window_settings(silent=True)
-        name = self.preset_var.get().strip()
+    def _check_preset_name(self, name: str) -> bool:
         if not name or name.lower() == "untitled":
             messagebox.showerror("Name required", "Set a preset name before saving.")
+            return False
+        if name.casefold() == SCRATCH_NAME:
+            messagebox.showerror("Reserved name", f"'{SCRATCH_NAME}' is reserved for unnamed launches.")
+            return False
+        if any(c in name for c in '\\/:*?"<>|'):
+            messagebox.showerror("Bad name", 'A preset name cannot contain \\ / : * ? " < > |')
+            return False
+        return True
+
+    def _prepare_write(
+        self, name: str | None, exclude: Path | None = None
+    ) -> tuple[Path, list[dict], str] | None:
+        """Shared Save/Launch gate: pick the file, confirm an overwrite, check the slots.
+
+        name None targets the scratch file, with `exclude` the preset whose slots
+        it may reuse. Returns (path, windows to write, note for the user), or None
+        if the user cancelled or a check failed. self.windows is never modified;
+        the caller adopts the returned windows only once the file is written.
+        """
+        windows = copy.deepcopy(self.windows)
+        note = ""
+        if name is None:
+            path = scratch_path()
+        else:
+            current = self._preset_path
+            path = (
+                current
+                if current and not is_scratch(current) and current.stem == name
+                else PRESETS_DIR / f"{name}.json"
+            )
+            if path.exists() and not same_path(path, current):
+                if not messagebox.askyesno(
+                    "Replace preset",
+                    f"A different preset named '{path.stem}' already exists.\n\n"
+                    "Replace it with the layout in the editor?",
+                ):
+                    return None
+            if current and not is_scratch(current) and not same_path(path, current):
+                # A copy under a new name must not inherit the original's slots,
+                # or both presets would resume the same Claude conversations.
+                used = collect_used_window_nums()
+                for win in windows:
+                    win["windowNum"] = next_window_num(used)
+                    used.add(win["windowNum"])
+                note = (
+                    f"'{path.stem}' got new window slots "
+                    + ", ".join(str(w["windowNum"]) for w in windows)
+                    + f" so it does not share Claude sessions with '{current.stem}'."
+                )
+            exclude = path
+
+        nums = [w["windowNum"] for w in windows]
+        if len(nums) != len(set(nums)):
+            messagebox.showerror(
+                "Duplicate slots",
+                "Each terminal window needs a unique window slot number.",
+            )
+            return None
+
+        claims = slot_claims(exclude)
+        claude_slots = {
+            w["windowNum"]
+            for w in windows
+            if any(t.get("agent") == "claude" for t in w.get("tabs") or [])
+        }
+        blocking: list[str] = []
+        shared: list[str] = []
+        for num in nums:
+            for owner, owner_has_claude in claims.get(num, []):
+                line = f"slot {num}: preset '{owner}'"
+                (blocking if owner_has_claude or num in claude_slots else shared).append(line)
+        if blocking:
+            messagebox.showerror(
+                "Shared window slot",
+                "These window slots already belong to other presets, and Claude tabs on "
+                "them would resume each other's conversations:\n\n"
+                + "\n".join(blocking)
+                + "\n\nGive the window a free slot, apply it, then try again.",
+            )
+            return None
+        if shared and not messagebox.askyesno(
+            "Shared window slot",
+            "These window slots already belong to other presets:\n\n"
+            + "\n".join(shared)
+            + "\n\nNo Claude tab uses them yet, so nothing resumes the wrong conversation "
+            "today, but adding one later would. Continue anyway?",
+        ):
+            return None
+        return path, windows, note
+
+    def _write_preset(self, path: Path, name: str, windows: list[dict]) -> bool:
+        try:
+            write_text_atomic(path, json.dumps({"name": name, "windows": windows}, indent=2) + "\n")
+        except OSError as exc:
+            messagebox.showerror("Write failed", f"Could not write {path}: {exc}")
+            return False
+        return True
+
+    def _adopt_written(self, path: Path, name: str, windows: list[dict]) -> None:
+        """Make the editor reflect a preset file that was just written."""
+        self.windows = windows
+        self._preset_path = path
+        record_window_nums(w["windowNum"] for w in windows)
+        self._refresh_preset_list()
+        self.preset_var.set(name)
+        save_last_preset(None if is_scratch(path) else name)
+        index = self.current_window_index or 0
+        self._refresh_window_list()
+        self._load_window_into_form(min(index, len(self.windows) - 1))
+
+    def _save_preset(self) -> None:
+        if not self._apply_window_settings(silent=True):
+            return
+        name = self.preset_var.get().strip()
+        if not self._check_preset_name(name):
             return
         if any(not w.get("tabs") for w in self.windows):
             if not messagebox.askyesno(
@@ -646,26 +917,19 @@ class LayoutUI(ctk.CTk):
             ):
                 return
 
-        nums = [w["windowNum"] for w in self.windows]
-        if len(nums) != len(set(nums)):
-            messagebox.showerror(
-                "Duplicate slots",
-                "Each terminal window needs a unique window slot number.",
-            )
+        prepared = self._prepare_write(name)
+        if prepared is None:
             return
-
-        path = (
-            self._preset_path
-            if self._preset_path and self._preset_path.stem == name
-            else PRESETS_DIR / f"{name}.json"
-        )
-        payload = {"name": name, "windows": self.windows}
-        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        self._preset_path = path
-        self._refresh_preset_list()
-        self.preset_var.set(name)
-        save_last_preset(name)
-        messagebox.showinfo("Saved", f"Wrote {path}")
+        path, windows, note = prepared
+        if not self._write_preset(path, name, windows):
+            return
+        self._adopt_written(path, name, windows)
+        # The unnamed launch this may have come from now lives under a real name.
+        try:
+            scratch_path().unlink(missing_ok=True)
+        except OSError:
+            pass
+        messagebox.showinfo("Saved", f"Wrote {path}" + (f"\n\n{note}" if note else ""))
 
     def _delete_preset(self) -> None:
         name = self.preset_var.get().strip()
@@ -675,6 +939,8 @@ class LayoutUI(ctk.CTk):
             return
         if not messagebox.askyesno("Delete", f"Delete preset '{name}'?"):
             return
+        # Retire its slots for good, so a later preset never resumes its conversations.
+        record_window_nums(num for num, _claude in _preset_slots(path))
         path.unlink(missing_ok=True)
         self._refresh_preset_list()
         self._new_preset()
@@ -683,9 +949,7 @@ class LayoutUI(ctk.CTk):
 
     def _save_repos(self) -> None:
         try:
-            REPOS_FILE.write_text(
-                json.dumps({"repos": self.repos}, indent=2) + "\n", encoding="utf-8"
-            )
+            write_text_atomic(REPOS_FILE, json.dumps({"repos": self.repos}, indent=2) + "\n")
         except OSError as exc:
             messagebox.showerror("Work directories", f"Could not save {REPOS_FILE}: {exc}")
 
@@ -839,16 +1103,17 @@ class LayoutUI(ctk.CTk):
         self._update_slot_hint()
         self._refresh_tabs_tree()
 
-    def _apply_window_settings(self, silent: bool = False) -> None:
+    def _apply_window_settings(self, silent: bool = False) -> bool:
+        """Copy the form into the selected window; False if the form holds bad numbers."""
         if self.current_window_index is None or not self.windows:
-            return
+            return True
         win = self.windows[self.current_window_index]
         try:
             monitor = int(self.monitor_var.get())
             slot = int(self.window_num_var.get())
         except (tk.TclError, ValueError):
             messagebox.showerror("Numbers", "Monitor and window slot must be whole numbers.")
-            return
+            return False
         win["name"] = self.window_name_var.get().strip() or win.get("name", "Terminal")
         win["targetMonitor"] = monitor
         win["windowNum"] = slot
@@ -856,6 +1121,7 @@ class LayoutUI(ctk.CTk):
         self._update_slot_hint()
         if not silent:
             messagebox.showinfo("Updated", "Window settings applied.")
+        return True
 
     def _add_window(self) -> None:
         self._apply_window_settings(silent=True)
@@ -1051,7 +1317,13 @@ class LayoutUI(ctk.CTk):
         if col_name == "agent":
             if value not in AGENT_BY_KEY:
                 return
-            tab["agent"] = value
+            if value != tab.get("agent"):
+                # Model, effort and context values are per agent; carrying them over
+                # would pass one CLI another's model id. Cursor takes none of them.
+                tab["agent"] = value
+                tab["model"] = DEFAULT_MODEL_BY_AGENT.get(value, "")
+                tab["effort"] = "" if value == "cursor" else DEFAULT_EFFORT
+                tab["contextWindow"] = DEFAULT_CONTEXT_BY_AGENT.get(value, "")
         elif col_name == "context":
             tab["contextWindow"] = value
         elif col_name == "path":
@@ -1073,9 +1345,23 @@ class LayoutUI(ctk.CTk):
             return None
         return self.tabs_tree.index(sel[0])
 
+    def _confirm_tab_shift(self, action: str) -> bool:
+        """Claude resumes by tab position, so ask before changing it in a window with Claude tabs."""
+        if not any(t.get("agent") == "claude" for t in self._current_tabs()):
+            return True
+        return messagebox.askyesno(
+            "Claude sessions",
+            f"{action} changes tab positions in this window. Claude tabs resume the "
+            "conversation saved for their position, so the affected Claude tabs will "
+            "open another tab's conversation (or a fresh one) on the next launch.\n\n"
+            "Continue?",
+        )
+
     def _remove_tab(self) -> None:
         idx = self._selected_tab_index()
         if idx is None:
+            return
+        if not self._confirm_tab_shift("Removing this tab"):
             return
         tabs = self._current_tabs()
         del tabs[idx]
@@ -1089,6 +1375,8 @@ class LayoutUI(ctk.CTk):
         new_idx = idx + delta
         if new_idx < 0 or new_idx >= len(tabs):
             return
+        if not self._confirm_tab_shift("Moving this tab"):
+            return
         tabs[idx], tabs[new_idx] = tabs[new_idx], tabs[idx]
         self._refresh_tabs_tree()
         children = self.tabs_tree.get_children()
@@ -1097,47 +1385,56 @@ class LayoutUI(ctk.CTk):
     # --- launch ----------------------------------------------------------
 
     def _launch(self, dry_run: bool = False) -> None:
-        self._apply_window_settings(silent=True)
+        if not self._apply_window_settings(silent=True):
+            return
         if not any(w.get("tabs") for w in self.windows):
             messagebox.showerror("No tabs", "Add at least one tab before launching.")
             return
 
         name = self.preset_var.get().strip() or "Untitled"
-        # Always write a temp/autosave so launch uses current editor state.
-        if name.lower() == "untitled":
-            path = PRESETS_DIR / "_scratch.json"
+        untitled = name.lower() == "untitled"
+        # Launch saves the editor state first so it runs what is on screen. An
+        # unnamed layout goes to the scratch file; so does a dry run, which must
+        # never touch the real preset file.
+        if dry_run:
+            prepared = self._prepare_write(None, exclude=self._preset_path)
+        elif untitled:
+            prepared = self._prepare_write(None)
         else:
-            path = PRESETS_DIR / f"{name}.json"
-        path.write_text(
-            json.dumps({"name": name, "windows": self.windows}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        self._preset_path = path
-        self._refresh_preset_list()
-        save_last_preset(name if name.lower() != "untitled" else None)
+            if not self._check_preset_name(name):
+                return
+            prepared = self._prepare_write(name)
+        if prepared is None:
+            return
+        path, windows, note = prepared
+        if not self._write_preset(path, name, windows):
+            return
+        if not dry_run:
+            self._adopt_written(path, name, windows)
 
-        args = [
-            "powershell",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(INVOKE_PS1),
-            "-ConfigPath",
-            str(path),
-        ]
+        args = ["powershell", "-ExecutionPolicy", "Bypass"]
+        if dry_run:
+            # Keep the window open: the exe has no console of its own to print into.
+            args.append("-NoExit")
+        args += ["-File", str(INVOKE_PS1), "-ConfigPath", str(path)]
         if dry_run:
             args.append("-DryRun")
 
         try:
-            proc = subprocess.Popen(args, cwd=str(ROOT))
+            proc = subprocess.Popen(
+                args,
+                cwd=str(ROOT),
+                creationflags=subprocess.CREATE_NEW_CONSOLE if dry_run else 0,
+            )
         except OSError as exc:
             messagebox.showerror("Launch failed", str(exc))
             return
 
+        suffix = f"\n\n{note}" if note else ""
         if dry_run:
-            messagebox.showinfo("Dry run", f"Started dry-run (pid {proc.pid}). Check the console.")
+            messagebox.showinfo("Dry run", f"Started dry-run (pid {proc.pid}) in its own console.")
         else:
-            messagebox.showinfo("Launching", f"Started layout (pid {proc.pid}).")
+            messagebox.showinfo("Launching", f"Started layout (pid {proc.pid}).{suffix}")
 
 
 def main() -> int:
