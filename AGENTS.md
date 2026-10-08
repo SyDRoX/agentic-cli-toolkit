@@ -8,15 +8,15 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 
 | Area | Entry point | Notes |
 |------|-------------|-------|
-| Layout composer UI | `LayoutUI.bat` -> `layout_ui.py` | Python 3 + customtkinter. Edits/launches JSON presets in `custom-layouts/`. Work directories in `repos.json`. Theme tokens in `ui_theme.py`. Last opened preset is stored in `.layout-ui-state.json` beside the script/exe and reopened on the next start. |
+| Layout composer UI | `LayoutUI.bat` -> `layout_ui.py` | Python 3 + customtkinter. Edits/launches JSON presets in `custom-layouts/`. Work directories in `repos.json`. Theme tokens in `ui_theme.py`. Last opened preset and recently picked models are stored in `.layout-ui-state.json` beside the script/exe and reopened on the next start. |
 | Standalone exe | `Build-LayoutUI.ps1` + `LayoutUI.spec` | PyInstaller onefile to repo root. Exe reads `custom-layouts/`, `repos.json`, `ps1-scripts/` from its own folder; none bundled. |
 | Layout launcher | `ps1-scripts/Invoke-CustomLayout.ps1 -ConfigPath <json> [-DryRun]` | One `Invoke-LayoutWindow` call per window. Maps `agent` key to launcher. |
-| Layout engine | `ps1-scripts/LayoutEngine.ps1` | Dot-sourced. Opens one WT window, one tab per repo, maximized on target monitor. Win32 plumbing lives here. |
+| Layout engine | `ps1-scripts/LayoutEngine.ps1` | Dot-sourced. Opens one WT window, one tab per repo, maximized or snapped left/right on target monitor. Win32 plumbing lives here. |
 | Per-agent launchers | `launchers/launch-{claude,codex,pi,agent}.ps1` | Positional args: TabIndex, Label, WindowNum, Model, Effort, ContextWindow. Run inside the tab's working dir. |
 | Session resume | `ps1-scripts/SessionSlot.ps1`, `hooks/devlayout-session-save.ps1`, `register-session-hook.js` | Claude only. Install via `ps1-scripts/Setup-DevLayout.ps1`. Dry-run via `ps1-scripts/Test-Resume.ps1`. |
 | Notifications | `agentic-cli-notify/` | Taskbar flash + WPF popup per WT tab. Own docs: `agentic-cli-notify/README.md`, `agentic-cli-notify/CLAUDE.md`. |
 | Explorer menu | `ps1-scripts/LLM_ContextMenu_Toggle.ps1` + `LLM_ContextMenu.config.yaml` | "Open LLM CLI here" registry menu. YAML drives entries, toggles, defaults. Re-run script after YAML edits. |
-| Hotkey shortcut | `ps1-scripts/Setup-DevLayoutShortcut.ps1 [-Desktop]` | Ctrl+Alt+D Start Menu shortcut to `LayoutUI.bat`. |
+| Hotkey shortcut | `ps1-scripts/Setup-DevLayoutShortcut.ps1 [-Preset <name-or-path>] [-Desktop]` | Ctrl+Alt+D Start Menu shortcut. Opens `LayoutUI.bat`, or with `-Preset` launches that layout via `Invoke-CustomLayout.ps1` (no UI). |
 
 ## Layout JSON schema
 
@@ -25,7 +25,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
   "name": "Main",
   "windows": [
     {
-      "name": "label", "windowNum": 102, "targetMonitor": 0,
+      "name": "label", "windowNum": 102, "targetMonitor": 0, "position": "maximize",
       "tabs": [
         { "title": "T1", "workingDir": "C:\\Repos\\x", "agent": "pi",
           "model": "openrouter/tencent/hy4-preview", "effort": "medium", "contextWindow": "0.25m" }
@@ -35,12 +35,13 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 }
 ```
 
+- `position`: `maximize` (default) | `left` | `right`. Left/right snap the window to that half of `targetMonitor` via Win+Arrow. Not editable in the UI yet; the UI preserves it on save.
 - `agent`: `claude` | `codex` | `pi` | `cursor` (alias `agent`). Case-insensitive.
 - `model`, `effort`, `contextWindow` optional; empty = CLI default. Cursor ignores all three.
 - `effort`: `low|medium|high|xhigh|max`. Claude `--effort`, Codex `model_reasoning_effort`, pi `--thinking`.
 - `contextWindow`: Claude only `default[1m]`; Codex `default|0.25m|0.5m|MAX`; pi `default|0.25m|0.5m|1m|MAX`. Pi has no flag, so `launch-pi.ps1` writes `modelOverrides.contextWindow` into a per-tab config directory (see below).
 - Pi `MAX` means the selected model's catalog window from `~/.pi/agent/models-store.json`. For the OpenAI GPT-5.6 models that catalog value is pi's short-context-pricing default (272000), not the provider ceiling, so `MAX` is a no-op there and `1m` is what opts them into the long-context window. Verify any change with `pi --list-models <id>`, which prints the effective window.
-- Model/effort/context option lists live in `layout_ui.py` constants (`CLAUDE_MODELS`, `CODEX_MODELS`, `PI_MODELS`, ...).
+- Model lists are live: `model_catalog.py` reads Claude `/v1/models` (`ANTHROPIC_API_KEY`, else the Claude Code OAuth token), Codex `~/.codex/models_cache.json` and pi `~/.pi/agent/models-store.json`, caches them in `.model-cache.json` beside the script/exe for 24h, and falls back to the cache of any age, then to the `CLAUDE_MODELS` / `CODEX_MODELS` / `PI_MODELS` constants in `layout_ui.py`. The UI starts on the cache, refreshes in a background thread, and has a "Refresh models" button that bypasses the TTL. The model cell dropdown shows 10 entries: the last 5 models picked per agent (`recentModels` in `.layout-ui-state.json`), then catalog order (Claude newest first, Codex by priority, pi `anthropic*` then `openai*` providers first). Typing filters the full catalog (every word must match, prefix matches first); Down opens the filtered list. Effort/context lists are still constants. Tests: `python -m unittest discover -s tests`.
 
 ## Invariants (do not break)
 
@@ -50,6 +51,8 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 - **Codex/pi/Cursor resume is per working dir** (`codex resume --last`, `pi --continue`, `agent --continue --workspace`). No slot logic.
 - **Pi context window is a per-tab config overlay.** pi reads `modelOverrides` only from `<config dir>/models.json`, and that file is global, so writing it from every tab makes the last tab launched win for all of them. `launch-pi.ps1` therefore points `PI_CODING_AGENT_DIR` at `~/.pi/devlayout/w<N>-t<M>`, an overlay rebuilt on every launch that holds its own `models.json` (the global one, if any, with the tab's override merged in, so custom providers survive) and shares every other entry of `~/.pi/agent` - directories (`sessions`, `extensions`, `skills`, ...) as NTFS junctions, files (`auth.json`, `settings.json`, `AGENTS.md`, ...) as hard links. Never share by a fixed list: pi reads more from its config directory than any list here would keep up with. Hard links are safe because pi rewrites those files in place (`writeFileSync`), never through a temp-file rename; if that changes upstream, the overlay would go stale and the shared files must be junctioned or copied instead. `trust.json` is seeded as `{}` in the global directory so a `/trust` decision persists there. Sessions stay global through the `sessions` junction: pi stores a session in `<config dir>\sessions\--<cwd with separators replaced>--`, so junctioning that directory keeps one store and keeps `pi --continue` per working dir. Never set `PI_CODING_AGENT_SESSION_DIR` instead - it names the exact session directory, which drops pi's per-working-dir split and makes every tab resume the session written last in any repo. Tabs on `contextWindow: "default"`, or whose value equals the model's catalog window, get no overlay and no env vars. Never write `~/.pi/agent/models.json` from a launcher.
 - Launchers clear inherited `CLAUDECODE` env to avoid nested-session error.
+- `Invoke-CustomLayout.ps1` strips agent-session env (`CLAUDE_CODE_CHILD_SESSION`, `NO_COLOR`, ...) before calling wt.exe, because wt.exe passes the caller's env to new tabs. Launched from inside Claude Code, tabs otherwise lose color and transcript saving. Vars set at User/Machine scope are kept.
+- Never put `;` inside a tab command: wt.exe splits on it as a tab separator.
 - `register-session-hook.js` edits only its own key in `~/.claude/settings.json`. Do not replace with a PowerShell JSON round-trip (needs PS 6+, reformats file).
 - Notification state keyed by `WT_SESSION`. Hooks outside Windows Terminal are ignored.
 
@@ -60,8 +63,8 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 - No emojis in code or scripts.
 - Scripts resolve paths from `$PSScriptRoot` / `$MyInvocation`; never hardcode user or checkout paths.
 - Non-interactive scripts: no `Read-Host`; take switches instead.
-- Python: `layout_ui.py` single-file UI; colors only via `ui_theme.resolve_color()`; unknown role raises.
-- Gitignored runtime output: `LayoutUI.exe`, `build/`, `__pycache__/`, user presets in `custom-layouts/` (except `Main.json`, `Mixed Example.json`), notify state files (`.hwnd-*`, `.tabindex-*`, `.popup-*.pid`, `.slots/`, `save-hwnd.exe`).
+- Python: `layout_ui.py` single-file UI (`model_catalog.py` stays UI-free); colors only via `ui_theme.resolve_color()`; unknown role raises.
+- Gitignored runtime output: `LayoutUI.exe`, `build/`, `__pycache__/`, `.model-cache.json`, user presets in `custom-layouts/` (except `Main.json`, `Mixed Example.json`), notify state files (`.hwnd-*`, `.tabindex-*`, `.popup-*.pid`, `.slots/`, `save-hwnd.exe`).
 
 ## Common commands
 

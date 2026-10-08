@@ -16,6 +16,9 @@ custom-layouts/*.json
 layout_ui_error.log
 .*.json.*.tmp
 
+# Live model lists cached by model_catalog.py
+.model-cache.json
+
 # PyInstaller build output
 build/
 LayoutUI.exe

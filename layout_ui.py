@@ -13,12 +13,14 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 
+import model_catalog
 from ui_theme import (
     FONT_BODY,
     FONT_LABEL,
@@ -52,6 +54,8 @@ INVOKE_PS1 = ROOT / "ps1-scripts" / "Invoke-CustomLayout.ps1"
 # Small runtime state beside the exe: which preset was open last, so the next
 # start reopens it instead of an empty "Untitled".
 UI_STATE_FILE = ROOT / ".layout-ui-state.json"
+# Live model lists fetched from each CLI's catalog; see model_catalog.py.
+MODEL_CACHE_FILE = ROOT / ".model-cache.json"
 SLOT_START = 100
 # Launch writes an unnamed layout to <SCRATCH_NAME>.json; it is not a preset and
 # claims no slots.
@@ -77,6 +81,7 @@ AGENT_BY_KEY = {key: label for label, key in AGENTS}
 AGENT_BY_LABEL = {label: key for label, key in AGENTS}
 
 # Model choices per agent (editable combos - typing a value not listed is fine).
+# Fallback only: the UI shows the live lists from model_catalog when it can reach them.
 # Claude: --model accepts these aliases or a full model id (see `claude --help`).
 CLAUDE_MODELS = [
     "", "opus", "sonnet", "fable",
@@ -344,6 +349,13 @@ def save_last_preset(name: str | None) -> None:
     save_ui_state(lastPreset=name or None)
 
 
+def load_recent_models() -> dict[str, list[str]]:
+    recent = load_ui_state().get("recentModels")
+    if not isinstance(recent, dict):
+        return {}
+    return {k: [m for m in v if isinstance(m, str)] for k, v in recent.items() if isinstance(v, list)}
+
+
 class Spinbox(ctk.CTkFrame):
     """customtkinter has no spinbox, so pair a themed entry with clamped -/+ buttons."""
 
@@ -443,6 +455,12 @@ class LayoutUI(ctk.CTk):
         self.current_window_index: int | None = None
         self._preset_path: Path | None = None
         self._cell_editor: any = None
+        self.models_by_agent = model_catalog.resolve_models(
+            MODEL_CACHE_FILE, MODELS_BY_AGENT, is_offline=True
+        )
+        self._model_fetch: threading.Thread | None = None
+        self._fetched_models: dict[str, list[str]] | None = None
+        self.recent_models = load_recent_models()
 
         self._build()
         # Seed the slot high-water mark from presets that predate it.
@@ -456,6 +474,7 @@ class LayoutUI(ctk.CTk):
             self._log_error(traceback.format_exc())
             self._new_preset(initial=True)
         self._refresh_preset_list()
+        self._refresh_models()
 
     # --- themed widget factories ----------------------------------------
 
@@ -573,6 +592,10 @@ class LayoutUI(ctk.CTk):
         self._button(top, "Work Directories", self._manage_repos, width=130).pack(
             side=tk.LEFT, padx=(12, 2)
         )
+        self.refresh_models_button = self._button(
+            top, "Refresh models", lambda: self._refresh_models(is_forced=True), width=120
+        )
+        self.refresh_models_button.pack(side=tk.LEFT, padx=2)
         self._button(top, "Launch", self._launch, accent=True).pack(side=tk.RIGHT, padx=2)
         self._button(top, "Dry run", lambda: self._launch(dry_run=True)).pack(side=tk.RIGHT, padx=2)
 
@@ -662,6 +685,33 @@ class LayoutUI(ctk.CTk):
             text_color=resolve_color("dim", self.mode),
         )
         hint.pack(fill=tk.X, padx=8, pady=8)
+
+    # --- model lists -----------------------------------------------------
+
+    def _refresh_models(self, is_forced: bool = False) -> None:
+        if self._model_fetch and self._model_fetch.is_alive():
+            return
+
+        def work() -> None:
+            self._fetched_models = model_catalog.resolve_models(
+                MODEL_CACHE_FILE, MODELS_BY_AGENT, is_forced=is_forced
+            )
+
+        self.refresh_models_button.configure(text="Refreshing...", state="disabled")
+        self._model_fetch = threading.Thread(target=work, daemon=True)
+        self._model_fetch.start()
+        self.after(200, self._poll_models)
+
+    def _poll_models(self) -> None:
+        # Tk is not thread-safe, so the worker only hands its result over and the Tk thread applies it.
+        if self._model_fetch and self._model_fetch.is_alive():
+            self.after(200, self._poll_models)
+            return
+
+        if self._fetched_models:
+            self.models_by_agent = self._fetched_models
+            self._fetched_models = None
+        self.refresh_models_button.configure(text="Refresh models", state="normal")
 
     # --- modal helpers ---------------------------------------------------
 
@@ -1282,9 +1332,20 @@ class LayoutUI(ctk.CTk):
             )
             widget.bind("<FocusOut>", lambda _e: self._end_cell_edit())
         elif col_name == "model":
-            values = MODELS_BY_AGENT.get(agent_key, CLAUDE_MODELS)
+            catalog = self.models_by_agent.get(agent_key, self.models_by_agent["claude"])
+            recent = self.recent_models.get(agent_key, [])
             var = tk.StringVar(value=tab.get("model", ""))
-            widget = self._combo(tree, var, values, width=w)
+            widget = self._combo(tree, var, model_catalog.top_models(catalog, recent=recent), width=w)
+
+            def on_type(event: tk.Event) -> None:
+                if event.keysym in ("Return", "Escape", "Down", "Up", "Tab"):
+                    return
+                matches = model_catalog.filter_models(catalog, var.get(), recent=recent)
+                widget.configure(values=matches or model_catalog.top_models(catalog, recent=recent))
+
+            widget.bind("<KeyRelease>", on_type)
+            # CTkComboBox has no public way to open its list; Down is the natural key for it.
+            widget.bind("<Down>", lambda _e: widget._open_dropdown_menu())
             widget.bind("<Return>", lambda _e: commit(var.get().strip()))
             widget.bind("<FocusOut>", lambda _e: commit(var.get().strip()))
             widget.bind("<Escape>", lambda _e: self._end_cell_edit())
@@ -1333,6 +1394,12 @@ class LayoutUI(ctk.CTk):
             if value:
                 tab["title"] = value
         else:
+            if col_name == "model" and value and value != tab.get("model"):
+                agent_key = tab.get("agent", "")
+                self.recent_models[agent_key] = model_catalog.remember_model(
+                    self.recent_models.get(agent_key, []), value
+                )
+                save_ui_state(recentModels=self.recent_models)
             tab[col_name] = value
         self._refresh_tabs_tree()
         children = self.tabs_tree.get_children()

@@ -69,6 +69,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Collections.Generic;
+using System.Threading;
 
 public class WinApi
 {
@@ -112,6 +113,27 @@ public class WinApi
 
     public const int SW_RESTORE  = 9;
     public const int SW_MAXIMIZE = 3;
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    public const byte VK_LWIN  = 0x5B;
+    public const byte VK_LEFT  = 0x25;
+    public const byte VK_RIGHT = 0x27;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+
+    // Win+Arrow rather than MoveWindow: native snap sizes to the monitor's work
+    // area exactly, including WT's invisible resize borders, on any DPI.
+    public static void SendWinKey(byte arrowKey)
+    {
+        keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
+        Thread.Sleep(10);
+        keybd_event(arrowKey, 0, 0, UIntPtr.Zero);
+        Thread.Sleep(10);
+        keybd_event(arrowKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        Thread.Sleep(10);
+        keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+    }
 
     public static bool ForceForeground(IntPtr hWnd)
     {
@@ -216,6 +238,36 @@ function Set-LayoutWindowMaximized {
     [WinApi]::ShowWindow($Handle, [WinApi]::SW_MAXIMIZE) | Out-Null
 }
 
+function Set-LayoutWindowSnapped {
+    param(
+        [IntPtr]$Handle,
+        [System.Drawing.Rectangle]$MonitorBounds,
+        [ValidateSet("Left", "Right")][string]$Side,
+        [int]$SettleDelayMs = 150
+    )
+    if ($Handle -eq [IntPtr]::Zero) { return }
+
+    Set-LayoutWindowForeground -Handle $Handle
+    [WinApi]::ShowWindow($Handle, [WinApi]::SW_RESTORE) | Out-Null
+    Start-Sleep -Milliseconds $SettleDelayMs
+
+    # Win+Arrow snaps within the monitor the window sits on, so park it in the
+    # middle of the target first; pressed again it would hop to the next monitor.
+    $width  = [int]($MonitorBounds.Width / 2)
+    $height = [int]($MonitorBounds.Height / 2)
+    [WinApi]::MoveWindow($Handle,
+        ($MonitorBounds.X + [int]($MonitorBounds.Width / 4)),
+        ($MonitorBounds.Y + [int]($MonitorBounds.Height / 4)),
+        $width, $height, $true) | Out-Null
+    Start-Sleep -Milliseconds $SettleDelayMs
+
+    # Win+Arrow acts on whatever is foreground, so reclaim it right before.
+    Set-LayoutWindowForeground -Handle $Handle
+    if ($Side -eq "Left") { [WinApi]::SendWinKey([WinApi]::VK_LEFT) }
+    else                  { [WinApi]::SendWinKey([WinApi]::VK_RIGHT) }
+    Start-Sleep -Milliseconds $SettleDelayMs
+}
+
 function Find-NewTerminalWindow {
     param([IntPtr[]]$ExistingWindows)
     foreach ($hwnd in [WinApi]::FindWindowsByProcess("WindowsTerminal")) {
@@ -304,10 +356,10 @@ function Build-LayoutSegments {
 function Invoke-LayoutWindow {
     <#
     .SYNOPSIS
-        Launch one Windows Terminal window for a layout and maximize it.
+        Launch one Windows Terminal window for a layout and place it.
     .PARAMETER Layout
         Layout hashtable: Name, WindowNum, Tabs, and optionally TargetMonitor
-        and SettleDelayMs.
+        SettleDelayMs and Position (maximize | left | right; default maximize).
     .PARAMETER DryRun
         Print the wt.exe segments and exit without launching anything.
     #>
@@ -398,8 +450,13 @@ function Invoke-LayoutWindow {
     Set-Content (Join-Path $stateDir ".devlayout-hwnd-$($Layout.WindowNum)") $handle.ToInt64()
     Write-Host "    HWND: $($handle.ToInt64())" -ForegroundColor Gray
 
-    Write-Host "  maximizing on monitor $($monitorIndex + 1) of $($monitors.Count)..." -ForegroundColor Cyan
-    Set-LayoutWindowMaximized -Handle $handle -MonitorBounds $targetMonitor -SettleDelayMs $Layout.SettleDelayMs
+    $position = if ($Layout.Position) { [string]$Layout.Position } else { "maximize" }
+    Write-Host "  $position on monitor $($monitorIndex + 1) of $($monitors.Count)..." -ForegroundColor Cyan
+    switch ($position.ToLowerInvariant()) {
+        "left"  { Set-LayoutWindowSnapped -Handle $handle -MonitorBounds $targetMonitor -Side Left  -SettleDelayMs $Layout.SettleDelayMs }
+        "right" { Set-LayoutWindowSnapped -Handle $handle -MonitorBounds $targetMonitor -Side Right -SettleDelayMs $Layout.SettleDelayMs }
+        default { Set-LayoutWindowMaximized -Handle $handle -MonitorBounds $targetMonitor -SettleDelayMs $Layout.SettleDelayMs }
+    }
 
     Write-Host "$($Layout.Name): complete." -ForegroundColor Green
 }

@@ -19,7 +19,33 @@ param(
     [switch]$DryRun
 )
 
+# The hotkey runs this hidden, so a failure is only visible in this log.
+$launchLogDir = Join-Path $env:USERPROFILE ".claude\dev-layout"
+if (-not (Test-Path $launchLogDir)) { New-Item -ItemType Directory -Path $launchLogDir -Force | Out-Null }
+Start-Transcript -Path (Join-Path $launchLogDir "last-launch.log") -Force | Out-Null
+trap {
+    Write-Host "FATAL: $_`n$($_.ScriptStackTrace)"
+    Stop-Transcript | Out-Null
+    exit 1
+}
+
 . (Join-Path $PSScriptRoot "LayoutEngine.ps1")
+
+# wt.exe hands the caller's environment to the tabs it opens. Launched from inside
+# an agent session, its markers would leak in: CLAUDE_CODE_CHILD_SESSION turns off
+# transcript saving (so resume breaks) and NO_COLOR strips all color. Anything the
+# user set persistently at User or Machine scope is kept.
+$InheritedSessionVars = @(
+    "CLAUDECODE", "CLAUDE_PID", "NO_COLOR",
+    "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT"
+)
+foreach ($name in $InheritedSessionVars) {
+    $persisted = [Environment]::GetEnvironmentVariable($name, "User")
+    if ($null -eq $persisted) { $persisted = [Environment]::GetEnvironmentVariable($name, "Machine") }
+    if ($null -eq $persisted) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
+}
 
 $AgentMap = @{
     claude = @{ AgentName = "Claude"; LauncherScript = "launch-claude.ps1" }
@@ -40,7 +66,8 @@ if (-not $config.windows -or $config.windows.Count -eq 0) {
     exit 1
 }
 
-# launch-claude.ps1 polls this directory for the window handle, so it must match.
+# Must match the directory the launchers poll for .devlayout-hwnd-<WindowNum>,
+# or every tab waits out the 15s poll and then targets the foreground window.
 $stateDir = Join-Path $env:USERPROFILE ".claude\dev-layout"
 $presetName = if ($config.name) { [string]$config.name } else { [IO.Path]::GetFileNameWithoutExtension($ConfigPath) }
 
@@ -81,6 +108,7 @@ foreach ($win in $config.windows) {
         Name          = if ($win.name) { [string]$win.name } else { "$presetName #$index" }
         WindowNum     = [int]$win.windowNum
         TargetMonitor = if ($null -ne $win.targetMonitor) { [int]$win.targetMonitor } else { 0 }
+        Position      = if ($win.position) { [string]$win.position } else { "maximize" }
         SettleDelayMs = if ($win.settleDelayMs) { [int]$win.settleDelayMs } else { 150 }
         StateDir      = $stateDir
         Tabs          = $tabs
@@ -95,3 +123,4 @@ foreach ($win in $config.windows) {
 }
 
 Write-Host "Custom layout '$presetName': done." -ForegroundColor Green
+Stop-Transcript | Out-Null

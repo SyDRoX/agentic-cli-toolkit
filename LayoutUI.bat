@@ -1,8 +1,11 @@
 @echo off
 :: Open the Dev Layout Composer (Python + customtkinter).
-python -c "import customtkinter" >nul 2>&1
+:: Prefer the py launcher: a venv earlier on PATH (e.g. hermes) can shadow the real python.
+set "PY=python"
+where py >nul 2>&1 && set "PY=py -3"
+%PY% -c "import customtkinter" >nul 2>&1
 if errorlevel 1 (
     echo Installing dependencies...
-    python -m pip install -r "%~dp0requirements.txt"
+    %PY% -m pip install -r "%~dp0requirements.txt"
 )
-python "%~dp0layout_ui.py" %*
+%PY% "%~dp0layout_ui.py" %*
