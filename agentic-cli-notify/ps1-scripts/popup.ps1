@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 param(
     [string]$SessionId = "default",
     [int]$ScreenIndex = 0,
@@ -351,11 +352,9 @@ $window.Add_Closed({
     Remove-Item $claimFile -Force -ErrorAction SilentlyContinue
 })
 
-# Append PID to session pid file
-Add-Content -Path $pidFile -Value $PID
-
-# Clean dismiss file from previous run if stale
-Remove-Item $dismissFile -Force -ErrorAction SilentlyContinue
+# notify.ps1 records this popup's pid when it starts it, and clears any stale
+# dismiss file before that. Deleting the dismiss file here would swallow a
+# sibling popup's click that lands while this one is still loading.
 
 Write-PopupLog "STARTED"
 

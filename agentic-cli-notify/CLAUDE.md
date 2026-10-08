@@ -11,7 +11,8 @@ Hooks (cmd.exe) -> notify.ps1 (PowerShell) -> popup.ps1 (WPF)
   - Claude Code: `attention.cmd` / `resume.cmd` from `~/.claude/settings.json`
   - Codex: `codex-hook.ps1` from `$CODEX_HOME/hooks.json` (event read from the stdin payload)
   - Cursor Agent: `cursor-hook.ps1` from `~/.cursor/hooks.json`, events `stop` and `beforeSubmitPrompt`; the event is passed as `-Action` because the payload field name differs between Cursor versions
-  - pi: `pi-extension/agentic-cli-notify.ts`, installed to `~/.pi/agent/extensions/`, on `agent_settled` / `ui_prompt_start` (attention) and `session_start` / `before_agent_start` / `ui_prompt_end` (resume). Attention is gated on a turn the user started: the extension arms on `before_agent_start` and disarms on `agent_settled`, so pi's own startup dialogs (project trust, pickers) raise nothing. A turn the user aborted with escape sends `resume`, not `attention` - `agent_settled` carries no outcome, so the stop reason is read from `message_end`. Spawn the notifier without `detached`: DETACHED_PROCESS gives powershell.exe no console and it exits 0 without running the script. Use `windowsHide` so the child gets its own hidden console and does not rename the WT tab.
+  - pi: `pi-extension/agentic-cli-notify.ts`, installed to `~/.pi/agent/extensions/`, on `agent_settled` / `ui_prompt_start` (attention), `session_start` / `before_agent_start` (resume) and `ui_prompt_end` (dismiss). Attention is gated on a running turn: the extension arms on `before_agent_start` or `agent_start` (runs an extension starts skip `before_agent_start`) and disarms on `agent_settled`, so pi's own startup dialogs (project trust, pickers) raise nothing. A turn the user aborted with escape sends `resume`, not `attention` - `agent_settled` carries no outcome, so the stop reason is read from `message_end`. Spawn the notifier without `detached`: DETACHED_PROCESS gives powershell.exe no console and it exits 0 without running the script. Use `windowsHide` so the child gets its own hidden console and does not rename the WT tab. Notifier runs are queued one at a time so a quick `dismiss` cannot overtake the `attention` it answers.
+- `dismiss` is `resume` without re-capturing the selected tab: use it when the event does not prove the user is in the tab (a dialog that timed out).
 - `notify.ps1 -Agent` accepts `Claude`, `Codex`, `Pi`, `Cursor`; the value is only a popup title
 - `notify.ps1` is the dispatcher: flashes the taskbar, launches/kills popup processes
 - `popup.ps1` is a standalone WPF window launched as a separate PowerShell process with `-STA` flag
@@ -35,7 +36,7 @@ All runtime state is in `~/.claude/hooks/agentic-cli-notify/`, keyed by `WT_SESS
 
 - `.hwnd-{session}` - Window handle
 - `.tabindex-{session}` - Tab position (1-based)
-- `.popup-{session}.pid` - Active popup PID
+- `.popup-{session}.pid` - One `<pid>|<start ticks>` line per popup, written by `notify.ps1` when it starts the popup. A pid is only killed when its start time still matches, because Windows reuses pids.
 - `.slots/{screen}-{pid}.slot` - Stack slot claim per live popup, holding `<claimTicks>|<height>`. Popups stack by claim order and reflow down when a lower popup closes; claims of dead processes are purged on the next poll.
 
 ## Building

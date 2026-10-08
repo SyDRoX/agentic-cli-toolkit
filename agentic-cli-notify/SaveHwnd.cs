@@ -109,11 +109,19 @@ class SaveHwnd
 
     static void Main(string[] args)
     {
+        // Runs from notification hooks: an unhandled exception would only print
+        // a crash dialog or stack trace, so swallow everything.
+        try { Run(args); } catch { }
+    }
+
+    static void Run(string[] args)
+    {
         string suffix = Suffix(args);
         string dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".claude", "hooks", "agentic-cli-notify"
         );
+        Directory.CreateDirectory(dir);
 
         // Try process tree first (reliable for automated launches like DevLayout)
         IntPtr hwnd = FindWtWindowByProcessTree();

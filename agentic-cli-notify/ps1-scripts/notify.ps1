@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 param(
     [Parameter(Position=0)]
     [string]$Action = "attention",
@@ -64,8 +65,55 @@ public class WinHelper {
 }
 "@ -ErrorAction SilentlyContinue
 
+function Stop-SessionPopups {
+    # Close this session's popups. The pid file holds "<pid>|<start ticks>" per
+    # popup, written by this script the moment it starts one, so a popup that is
+    # still loading can be killed too. A process is only killed when its start
+    # time still matches: popups that closed on their own leave their line
+    # behind, and by the next call Windows may have given that pid to an
+    # unrelated process.
+    Set-Content $dismissFile "dismiss" -ErrorAction SilentlyContinue
+    if (Test-Path $pidFile) {
+        foreach ($line in (Get-Content $pidFile -ErrorAction SilentlyContinue)) {
+            $parts = $line.Trim() -split '\|'
+            $popupPid = 0
+            if (-not [int]::TryParse($parts[0], [ref]$popupPid) -or $popupPid -le 0) { continue }
+            $proc = Get-Process -Id $popupPid -ErrorAction SilentlyContinue
+            if ($proc -and $proc.ProcessName -like 'powershell*') {
+                $sameProcess = $true
+                if ($parts.Count -gt 1) {
+                    try { $sameProcess = ($proc.StartTime.ToUniversalTime().Ticks -eq [long]$parts[1]) } catch { $sameProcess = $false }
+                }
+                if ($sameProcess) { Stop-Process -Id $popupPid -Force -ErrorAction SilentlyContinue }
+            }
+            # A killed popup cannot release its own stack slot, so drop the
+            # claim here or the stack keeps a hole.
+            Get-ChildItem "$slotDir\*-$popupPid.slot" -ErrorAction SilentlyContinue |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Item $dismissFile -Force -ErrorAction SilentlyContinue
+}
+
+function Stop-SessionFlash {
+    if (Test-Path $hwndFile) {
+        $savedHwnd = [IntPtr]::new([long](Get-Content $hwndFile -Raw -ErrorAction SilentlyContinue))
+        if ([WinHelper]::IsWindow($savedHwnd)) {
+            [WinHelper]::StopFlash($savedHwnd)
+        }
+    }
+}
+
 try {
     switch ($Action) {
+        "dismiss" {
+            # The prompt that raised the popup went away without the user
+            # necessarily being in this tab (a dialog that timed out), so close
+            # the popup but do not re-capture the selected tab like resume does.
+            Stop-SessionFlash
+            Stop-SessionPopups
+        }
         "resume" {
             # Self-heal the stored window + tab position.
             #
@@ -85,32 +133,8 @@ try {
                 }
             }
 
-            # Stop flash on saved HWND
-            if (Test-Path $hwndFile) {
-                $savedHwnd = [IntPtr]::new([long](Get-Content $hwndFile -Raw -ErrorAction SilentlyContinue))
-                if ([WinHelper]::IsWindow($savedHwnd)) {
-                    [WinHelper]::StopFlash($savedHwnd)
-                }
-            }
-
-            # Dismiss this session's popups via signal file + process kill
-            Set-Content $dismissFile "dismiss" -ErrorAction SilentlyContinue
-            if (Test-Path $pidFile) {
-                $oldPids = Get-Content $pidFile -ErrorAction SilentlyContinue
-                if ($oldPids) {
-                    foreach ($p in $oldPids) {
-                        if ($p.Trim()) {
-                            Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue
-                            # A killed popup cannot release its own stack slot,
-                            # so drop the claim here or the stack keeps a hole.
-                            Get-ChildItem "$slotDir\*-$($p.Trim()).slot" -ErrorAction SilentlyContinue |
-                                Remove-Item -Force -ErrorAction SilentlyContinue
-                        }
-                    }
-                }
-                Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
-            }
-            Remove-Item $dismissFile -Force -ErrorAction SilentlyContinue
+            Stop-SessionFlash
+            Stop-SessionPopups
         }
         "attention" {
             # Read saved HWND for this session
@@ -168,30 +192,14 @@ try {
                 }
             } catch {}
 
-            # Kill any existing popups for this session
-            Set-Content $dismissFile "dismiss" -ErrorAction SilentlyContinue
-            if (Test-Path $pidFile) {
-                $oldPids = Get-Content $pidFile -ErrorAction SilentlyContinue
-                if ($oldPids) {
-                    foreach ($p in $oldPids) {
-                        if ($p.Trim()) {
-                            Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue
-                            # A killed popup cannot release its own stack slot,
-                            # so drop the claim here or the stack keeps a hole.
-                            Get-ChildItem "$slotDir\*-$($p.Trim()).slot" -ErrorAction SilentlyContinue |
-                                Remove-Item -Force -ErrorAction SilentlyContinue
-                        }
-                    }
-                }
-                Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
-            }
-            Remove-Item $dismissFile -Force -ErrorAction SilentlyContinue
+            Stop-SessionPopups
 
             # Launch one popup per screen
             Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
             $screens = [System.Windows.Forms.Screen]::AllScreens
             for ($i = 0; $i -lt $screens.Count; $i++) {
-                Start-Process powershell.exe -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$popupScript`" -SessionId $sessionId -ScreenIndex $i -Agent $Agent" -WindowStyle Hidden
+                $popup = Start-Process powershell.exe -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$popupScript`" -SessionId $sessionId -ScreenIndex $i -Agent $Agent" -WindowStyle Hidden -PassThru
+                Add-Content -Path $pidFile -Value "$($popup.Id)|$($popup.StartTime.ToUniversalTime().Ticks)"
             }
         }
     }

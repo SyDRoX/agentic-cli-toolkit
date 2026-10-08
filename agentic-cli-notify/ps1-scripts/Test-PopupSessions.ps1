@@ -25,7 +25,7 @@ function Get-SessionPopupIds([string]$Session) {
     $file = Join-Path $testDir ".popup-$Session.pid"
     if (Test-Path $file) {
         foreach ($line in (Get-Content $file -ErrorAction SilentlyContinue)) {
-            if ($line.Trim()) { [int]$line }
+            if ($line.Trim()) { [int]($line.Trim() -split '\|')[0] }
         }
     }
 }
@@ -88,7 +88,7 @@ try {
     $env:WT_SESSION = $savedSession
     # Only terminate processes recorded by this test's copied popup scripts.
     foreach ($file in (Get-ChildItem $testDir -Filter '.popup-*.pid' -ErrorAction SilentlyContinue)) {
-        foreach ($line in (Get-Content $file.FullName -ErrorAction SilentlyContinue)) { if ($line.Trim()) { $popupIds += [int]$line } }
+        foreach ($line in (Get-Content $file.FullName -ErrorAction SilentlyContinue)) { if ($line.Trim()) { $popupIds += [int]($line.Trim() -split '\|')[0] } }
     }
     foreach ($popupId in ($popupIds | Select-Object -Unique)) { Stop-Process -Id $popupId -ErrorAction SilentlyContinue }
     foreach ($form in $forms) { $form.Dispose() }

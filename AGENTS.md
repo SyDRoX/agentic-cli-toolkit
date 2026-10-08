@@ -87,7 +87,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\agentic-cli-notify\ps1-scr
 powershell -ExecutionPolicy Bypass -File .\ps1-scripts\LLM_ContextMenu_Toggle.ps1 -Mode New
 
 # Check the effective pi context window of one tab's overlay
-$env:PI_CODING_AGENT_DIR = "$env:USERPROFILE\.pi\devlayout\w102-t0"; pi --list-models gpt-5.6-luna
+$env:PI_CODING_AGENT_DIR = "$env:USERPROFILE\.pi\devlayout\w102-t1"; pi --list-models gpt-5.6-luna
 ```
 
 ## Adding a new agent

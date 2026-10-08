@@ -48,6 +48,9 @@ if ($Hwnd) {
         Write-Error "save-hwnd.exe not found at $saveHwnd. Re-run install.ps1."
         exit 1
     }
+    # save-hwnd.exe can return without writing anything; never fall back on
+    # files left by an earlier run in another tab.
+    Remove-Item -LiteralPath (Join-Path $InstallDir '.hwnd'), (Join-Path $InstallDir '.tabindex') -Force -ErrorAction SilentlyContinue
     & $saveHwnd
 
     $capturedHwnd = Join-Path $InstallDir '.hwnd'

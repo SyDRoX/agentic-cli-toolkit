@@ -28,7 +28,7 @@ Every supported agent maps its own lifecycle events onto the same two actions:
 | Claude Code | `Stop` | `UserPromptSubmit` | `~/.claude/settings.json` hooks |
 | Codex | `Stop` | `UserPromptSubmit` | `$CODEX_HOME/hooks.json` -> `codex-hook.ps1` |
 | Cursor Agent | `stop` | `beforeSubmitPrompt` | `~/.cursor/hooks.json` -> `cursor-hook.ps1` |
-| pi | `agent_settled`, `ui_prompt_start` (only while a user-started turn is running, and not after an abort) | `session_start`, `before_agent_start`, `ui_prompt_end` | `~/.pi/agent/extensions/agentic-cli-notify.ts` |
+| pi | `agent_settled`, `ui_prompt_start` (only while a user-started turn is running, and not after an abort) | `session_start`, `before_agent_start`, `ui_prompt_end` (closes the popup without re-capturing the tab) | `~/.pi/agent/extensions/agentic-cli-notify.ts` |
 
 Each session is isolated by its `WT_SESSION` environment variable, so notifications always target the correct window and tab.
 
@@ -210,7 +210,7 @@ agentic-cli-notify/
 ```
 .hwnd-{WT_SESSION}          # Saved window handle for this session
 .tabindex-{WT_SESSION}      # Saved tab index (1-based) for this session
-.popup-{WT_SESSION}.pid     # Active popup PID (for cleanup)
+.popup-{WT_SESSION}.pid     # Popup pid and start time per line (for cleanup)
 .slots/{screen}-{pid}.slot  # Stack slot claim: "<claimTicks>|<height>"
 ```
 

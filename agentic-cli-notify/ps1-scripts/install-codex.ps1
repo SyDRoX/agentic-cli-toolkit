@@ -8,8 +8,13 @@ $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $wpf = Join-Path (Split-Path $compiler) 'WPF'
 if (-not (Test-Path -LiteralPath $compiler)) { throw ".NET Framework compiler not found: $compiler" }
 $null = New-Item -ItemType Directory -Path $InstallDir -Force
-foreach ($file in @('notify.ps1', 'popup.ps1', 'codex-hook.ps1', 'attention.cmd', 'resume.cmd', 'setup.ps1', 'SaveHwnd.cs')) {
+# The PowerShell scripts live beside this file; the rest are in the parent folder.
+$packageRoot = Split-Path -Parent $PSScriptRoot
+foreach ($file in @('notify.ps1', 'popup.ps1', 'codex-hook.ps1')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $InstallDir -Force
+}
+foreach ($file in @('attention.cmd', 'resume.cmd', 'setup.ps1', 'SaveHwnd.cs')) {
+    Copy-Item -LiteralPath (Join-Path $packageRoot $file) -Destination $InstallDir -Force
 }
 & $compiler -nologo -optimize+ "-out:$InstallDir\save-hwnd.exe" "$InstallDir\SaveHwnd.cs" `
     "-r:$wpf\UIAutomationClient.dll" "-r:$wpf\UIAutomationTypes.dll" '-r:System.Management.dll'

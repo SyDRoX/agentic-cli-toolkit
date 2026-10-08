@@ -2,7 +2,8 @@
 # Codex sends lifecycle JSON on stdin. Never return a blocking hook decision.
 $ErrorActionPreference = 'Stop'
 try {
-    $event = [Console]::In.ReadToEnd() | ConvertFrom-Json
+    # Strip a leading BOM: a UTF-8 console code page adds one to piped input.
+    $event = [Console]::In.ReadToEnd().TrimStart([char]0xFEFF) | ConvertFrom-Json
     # No shared "default" state outside Windows Terminal, and no shell/path
     # interpolation from untrusted hook payloads.
     if ($env:WT_SESSION -match '^[a-zA-Z0-9-]+$') {
