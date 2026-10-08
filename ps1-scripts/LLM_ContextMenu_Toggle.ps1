@@ -390,7 +390,8 @@ function Start-LLMTerminal {
     $script = $setupSnippet + [Environment]::NewLine + $LaunchCommand
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
     $windowArguments = if ($TerminalMode -eq "Append") { "-w 0" } else { "-w -1" }
-    $arguments = "$windowArguments -d $(Quote-CommandArgument $Directory) powershell.exe -ExecutionPolicy Bypass -NoExit -EncodedCommand $encoded"
+    # wt.exe splits its command line on ";" even inside quotes unless written "\;".
+    $arguments = "$windowArguments -d $(Quote-CommandArgument $Directory.Replace(';', '\;')) powershell.exe -ExecutionPolicy Bypass -NoExit -EncodedCommand $encoded"
 
     $startParameters = @{
         FilePath = "wt.exe"

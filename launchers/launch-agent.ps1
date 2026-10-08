@@ -22,8 +22,10 @@ Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 
 # Trust the workspace so interactive trust prompts do not block tab startup.
 # `--continue` fails when this workspace has no prior chat; start a new one then.
+# Only a quick failure means that, not a long session that exited non-zero.
+$startedAt = Get-Date
 & agent --continue --trust --workspace $cwd
-if ($LASTEXITCODE -ne 0) {
+if ($LASTEXITCODE -ne 0 -and ((Get-Date) - $startedAt).TotalSeconds -lt 15) {
     Write-Host "[DevLayout] no saved Cursor Agent session for this repo; starting one." -ForegroundColor DarkGray
     & agent --trust --workspace $cwd
 }

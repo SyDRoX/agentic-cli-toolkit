@@ -35,9 +35,12 @@ Write-Host "[DevLayout] $Label" -ForegroundColor Cyan
 Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 
 # `--last` exits non-zero when this repo has no saved interactive session.
-# Start a new one then; the next launch resumes it automatically.
+# Start a new one then; the next launch resumes it automatically. Only a quick
+# failure means that: a long session that exits non-zero must not be followed by
+# an empty one, which would become `--last`.
+$startedAt = Get-Date
 & codex resume --last -C $cwd @extraArgs
-if ($LASTEXITCODE -ne 0) {
+if ($LASTEXITCODE -ne 0 -and ((Get-Date) - $startedAt).TotalSeconds -lt 15) {
     Write-Host "[DevLayout] no saved Codex session for this repo; starting one." -ForegroundColor DarkGray
     & codex -C $cwd @extraArgs
 }

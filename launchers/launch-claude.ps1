@@ -82,6 +82,10 @@ if ($effort)         { $extraArgs += @("--effort", $effort) }
 # launches so the hook fires with the slot already identified.
 $env:DEVLAYOUT_WINDOW = $windowNum
 $env:DEVLAYOUT_TAB    = $tabIndex
+# Every process Claude starts inherits these, including a headless `claude -p`
+# run from a tool call. The hook only records a session whose Claude process is
+# a direct child of this launcher.
+$env:DEVLAYOUT_LAUNCHER_PID = $PID
 
 # Claude Code does not expose the effort level to the statusline command, so
 # pass it through the environment for gsd-statusline.js to display.
@@ -95,18 +99,24 @@ else { Remove-Item Env:DEVLAYOUT_EFFORT -ErrorAction SilentlyContinue }
 Write-Host "[DevLayout] $label" -ForegroundColor Cyan
 Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 
+# Self-heal: if Claude rejects the session (deleted or corrupt transcript, or a
+# slot id already in use), fall back to a fresh session rather than leaving a
+# dead tab. The SessionStart hook records the new id, so the next launch resumes
+# that instead. Only a quick failure counts as a rejection: a session that ran
+# for a while and then exited non-zero must not be replaced by an empty one.
+$startedAt = Get-Date
 if ($slot.ResumeId) {
     Write-Host "[DevLayout] resuming $($slot.ResumeId) via $($slot.Source)" -ForegroundColor DarkGray
     & claude --dangerously-skip-permissions --resume $slot.ResumeId @extraArgs
-
-    # Self-heal: if the resume is rejected (deleted or corrupt transcript), fall
-    # back to a fresh session rather than leaving a dead tab. The SessionStart
-    # hook records the new id, so the next launch resumes that instead.
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "[DevLayout] resume of $($slot.ResumeId) failed (exit $LASTEXITCODE). Starting a fresh session; it will be remembered for next launch."
-        & claude --dangerously-skip-permissions @extraArgs
-    }
 } else {
     Write-Host "[DevLayout] new session, pinned to $($slot.DefaultSessionId)" -ForegroundColor DarkGray
     & claude --dangerously-skip-permissions --session-id $slot.DefaultSessionId @extraArgs
 }
+if ($LASTEXITCODE -ne 0 -and ((Get-Date) - $startedAt).TotalSeconds -lt 15) {
+    Write-Warning "[DevLayout] Claude rejected the session (exit $LASTEXITCODE). Starting a fresh session; it will be remembered for next launch."
+    & claude --dangerously-skip-permissions @extraArgs
+}
+
+# The shell stays open (-NoExit). Do not let a later manual `claude` in it
+# overwrite this slot.
+Remove-Item Env:DEVLAYOUT_WINDOW, Env:DEVLAYOUT_TAB, Env:DEVLAYOUT_LAUNCHER_PID -ErrorAction SilentlyContinue

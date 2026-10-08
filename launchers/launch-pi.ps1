@@ -13,10 +13,12 @@
 # and that file is global. Writing it from every tab makes the last tab launched win
 # for all of them. pi resolves its whole config directory from PI_CODING_AGENT_DIR,
 # so each tab gets an overlay directory under ~/.pi/devlayout/w<N>-t<M> that holds
-# its own models.json and shares everything else with ~/.pi/agent through NTFS
-# junctions (subdirectories) and hard links (files). pi writes those shared files in
-# place, never through a temp-file rename, so a hard link keeps both names on the
-# same data.
+# its own models.json and shares every other entry of ~/.pi/agent through NTFS
+# junctions (subdirectories) and hard links (files): AGENTS.md, SYSTEM.md, skills,
+# MCP config and extension settings included. pi writes those shared files in place,
+# never through a temp-file rename, so a hard link keeps both names on the same data.
+# The overlay's models.json is the global one (custom providers and all) with this
+# tab's contextWindow override merged in.
 #
 # The sessions directory is one of the junctioned subdirectories. pi stores a session
 # in <config dir>\sessions\--<cwd with separators replaced>--, so junctioning
@@ -46,20 +48,19 @@ $agentDir = Join-Path $env:USERPROFILE ".pi\agent"
 $storePath = Join-Path $agentDir "models-store.json"
 $overlayRoot = Join-Path $env:USERPROFILE ".pi\devlayout"
 
-# Subdirectories of the config directory that every tab must share. Junctioned.
-$SharedAgentDirs = @("bin", "extensions", "npm", "themes", "tools", "prompts", "sessions")
+# Every entry of the global config directory is shared with the overlay except
+# models.json, which the overlay rebuilds with its own override. Directories are
+# junctioned, files hard linked.
+$OverlayOwnedFiles = @("models.json")
 # Shared subdirectories pi creates on demand. Create them in the global directory
 # first so the junction has a target, otherwise the tab writes into the overlay,
 # which is rebuilt on the next launch.
 $SeededAgentDirs = @("sessions")
-# Files of the config directory that every tab must share. Hard linked.
-$SharedAgentFiles = @(
-    "auth.json", "models-store.json", "settings.json",
-    "statusline.json", "keybindings.json", "trust.json"
-)
 # Shared files pi creates on demand. Seed them in the global directory first so the
 # hard link exists before pi writes, otherwise the write lands in the overlay only.
 $SeededAgentFiles = @{ "trust.json" = "{}" }
+# pi's thinking levels, accepted as a ":<level>" suffix on --model.
+$ThinkingLevels = @("off", "minimal", "low", "medium", "high", "xhigh", "max")
 
 function Get-PiModelInfo {
     <#
@@ -74,7 +75,13 @@ function Get-PiModelInfo {
     if (-not $Pattern) { return $info }
 
     # Strip pi's optional ":<thinking>" suffix before matching against the catalog.
-    $bare = ($Pattern -split ':', 2)[0]
+    # Only a known level counts: ids such as "...:free" or "...:batch" contain a
+    # colon of their own.
+    $bare = $Pattern
+    $colon = $Pattern.LastIndexOf(':')
+    if ($colon -gt 0 -and $ThinkingLevels -contains $Pattern.Substring($colon + 1).ToLowerInvariant()) {
+        $bare = $Pattern.Substring(0, $colon)
+    }
 
     if (-not (Test-Path $storePath)) {
         # No catalog cached: fall back to the "provider/id" split when present.
@@ -153,10 +160,9 @@ function Remove-PiAgentOverlay {
 
     if (-not (Test-Path -LiteralPath $Path)) { return }
 
-    foreach ($name in $SharedAgentDirs) {
-        $link = Join-Path $Path $name
-        if (Test-Path -LiteralPath $link) {
-            try { [System.IO.Directory]::Delete($link, $false) } catch { }
+    foreach ($entry in (Get-ChildItem -LiteralPath $Path -Force -Directory -ErrorAction SilentlyContinue)) {
+        if ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            try { [System.IO.Directory]::Delete($entry.FullName, $false) } catch { }
         }
     }
     Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
@@ -186,33 +192,49 @@ function New-PiAgentOverlay {
         Remove-PiAgentOverlay -Path $path
         New-Item -ItemType Directory -Path $path -Force | Out-Null
 
-        foreach ($name in $SharedAgentDirs) {
+        foreach ($name in $SeededAgentDirs) {
             $target = Join-Path $agentDir $name
-            if (-not (Test-Path -LiteralPath $target) -and $SeededAgentDirs -contains $name) {
+            if (-not (Test-Path -LiteralPath $target)) {
                 New-Item -ItemType Directory -Path $target -Force | Out-Null
             }
-            if (Test-Path -LiteralPath $target) {
-                New-Item -ItemType Junction -Path (Join-Path $path $name) -Target $target -ErrorAction Stop | Out-Null
-            }
         }
-
-        foreach ($name in $SharedAgentFiles) {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        foreach ($name in $SeededAgentFiles.Keys) {
             $target = Join-Path $agentDir $name
-            if (-not (Test-Path -LiteralPath $target) -and $SeededAgentFiles.ContainsKey($name)) {
-                $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            if (-not (Test-Path -LiteralPath $target)) {
                 [System.IO.File]::WriteAllText($target, $SeededAgentFiles[$name], $utf8NoBom)
             }
-            if (Test-Path -LiteralPath $target) {
-                New-Item -ItemType HardLink -Path (Join-Path $path $name) -Target $target -ErrorAction Stop | Out-Null
+        }
+
+        foreach ($entry in (Get-ChildItem -LiteralPath $agentDir -Force)) {
+            if ($OverlayOwnedFiles -contains $entry.Name) { continue }
+            $link = Join-Path $path $entry.Name
+            if ($entry.PSIsContainer) {
+                New-Item -ItemType Junction -Path $link -Target $entry.FullName -ErrorAction Stop | Out-Null
+            } else {
+                New-Item -ItemType HardLink -Path $link -Target $entry.FullName -ErrorAction Stop | Out-Null
             }
         }
 
-        # Plain hashtables only: Windows PowerShell 5.1 ConvertTo-Json serializes a
-        # nested [ordered] dictionary as its type name instead of its contents.
-        $root = @{ providers = @{ $Provider = @{ modelOverrides = @{ $ModelId = @{ contextWindow = $Tokens } } } } }
-        $json = $root | ConvertTo-Json -Depth 10
+        # Start from the global models.json so custom providers and the user's own
+        # overrides still apply, then set this tab's context window on top.
+        $root = $null
+        $globalModels = Join-Path $agentDir "models.json"
+        if (Test-Path -LiteralPath $globalModels) {
+            $root = Get-Content -LiteralPath $globalModels -Raw -Encoding utf8 | ConvertFrom-Json
+        }
+        if ($null -eq $root) { $root = New-Object PSObject }
+        $node = $root
+        foreach ($key in @("providers", $Provider, "modelOverrides", $ModelId)) {
+            if ($null -eq $node.PSObject.Properties[$key]) {
+                $node | Add-Member -MemberType NoteProperty -Name $key -Value (New-Object PSObject)
+            }
+            $node = $node.$key
+        }
+        $node | Add-Member -MemberType NoteProperty -Name contextWindow -Value $Tokens -Force
+
+        $json = $root | ConvertTo-Json -Depth 20
         # Set-Content -Encoding utf8 writes a BOM on 5.1; write the bytes directly.
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText((Join-Path $path "models.json"), $json, $utf8NoBom)
     } catch {
         Write-Warning "[DevLayout] could not build the pi config overlay at ${path}: $($_.Exception.Message)"

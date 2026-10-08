@@ -248,6 +248,18 @@ function Resolve-TabLauncher {
     }
 }
 
+function ConvertTo-PsLiteral {
+    # A PowerShell single-quoted string literal for any value.
+    param([string]$Value)
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function ConvertTo-WtText {
+    # Text safe inside one double-quoted wt.exe argument.
+    param([string]$Value)
+    return $Value.Replace('"', '').Replace(';', '\;')
+}
+
 function Build-LayoutSegments {
     <#
     .SYNOPSIS
@@ -276,7 +288,11 @@ function Build-LayoutSegments {
         $model   = if ($tab.Model)         { $tab.Model }         else { "" }
         $effort  = if ($tab.Effort)        { $tab.Effort }        else { "" }
         $ctxWin  = if ($tab.ContextWindow) { $tab.ContextWindow } else { "" }
-        $segments += "$lead --title `"$($tab.Title)`" -d `"$dir`" `"$PwshExe`" -NoExit -ExecutionPolicy Bypass -Command `"& '$($resolved.LauncherPath)' $n '$label' $($Layout.WindowNum) '$model' '$effort' '$ctxWin'`""
+        # Values go inside '...' for PowerShell, so a quote is doubled. wt.exe splits
+        # its command line on ";" even inside quotes unless written "\;", and a
+        # double quote would end the quoted argument, so neither may reach it raw.
+        $launchCommand = "& $(ConvertTo-PsLiteral $resolved.LauncherPath) $n $(ConvertTo-PsLiteral $label) $($Layout.WindowNum) $(ConvertTo-PsLiteral $model) $(ConvertTo-PsLiteral $effort) $(ConvertTo-PsLiteral $ctxWin)"
+        $segments += "$lead --title `"$(ConvertTo-WtText $tab.Title)`" -d `"$(ConvertTo-WtText $dir)`" `"$PwshExe`" -NoExit -ExecutionPolicy Bypass -Command `"$(ConvertTo-WtText $launchCommand)`""
     }
     return $segments
 }

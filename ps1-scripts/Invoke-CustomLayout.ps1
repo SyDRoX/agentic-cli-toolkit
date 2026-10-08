@@ -40,7 +40,8 @@ if (-not $config.windows -or $config.windows.Count -eq 0) {
     exit 1
 }
 
-$stateDir = Join-Path $env:USERPROFILE ".dev-layout\custom"
+# launch-claude.ps1 polls this directory for the window handle, so it must match.
+$stateDir = Join-Path $env:USERPROFILE ".claude\dev-layout"
 $presetName = if ($config.name) { [string]$config.name } else { [IO.Path]::GetFileNameWithoutExtension($ConfigPath) }
 
 Write-Host "Custom layout '$presetName': $($config.windows.Count) window(s)" -ForegroundColor Cyan

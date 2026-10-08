@@ -52,16 +52,27 @@ function Get-SlotProjectPath {
     .SYNOPSIS
         The ~/.claude/projects directory Claude Code uses for a working directory.
     .DESCRIPTION
-        Claude Code derives the directory name by replacing ":" and "\" with "-",
-        e.g. C:\Repos\ormi-unity -> C--Repos-ormi-unity. TrimEnd guards against a
-        trailing separator producing a trailing "-" that would miss the real dir.
+        Claude Code derives the directory name by replacing every character
+        outside [a-zA-Z0-9] with "-", e.g. C:\Repos\my_app -> C--Repos-my-app.
+        Names longer than 200 characters are cut to 200 and get a "-<hash>"
+        suffix; the hash is Claude's own, so match that case by prefix. TrimEnd
+        guards against a trailing separator producing a trailing "-" that would
+        miss the real dir.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$WorkingDir
     )
 
-    $projectDir = $WorkingDir.TrimEnd('\') -replace '[:\\]', '-'
-    return (Join-Path $env:USERPROFILE ".claude\projects\$projectDir")
+    $projectsRoot = Join-Path $env:USERPROFILE ".claude\projects"
+    $projectDir = $WorkingDir.TrimEnd('\') -replace '[^a-zA-Z0-9]', '-'
+    if ($projectDir.Length -gt 200) {
+        $prefix = $projectDir.Substring(0, 200) + "-"
+        $match = Get-ChildItem -LiteralPath $projectsRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name.StartsWith($prefix) } | Select-Object -First 1
+        if ($match) { return $match.FullName }
+        $projectDir = $projectDir.Substring(0, 200)
+    }
+    return (Join-Path $projectsRoot $projectDir)
 }
 
 function Resolve-SlotResume {
