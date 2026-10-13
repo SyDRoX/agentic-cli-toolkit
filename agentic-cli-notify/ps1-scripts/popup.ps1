@@ -39,6 +39,21 @@ public class WinSwitch {
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
 
+    [DllImport("user32.dll")]
+    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    public const int GWL_EXSTYLE = -20;
+    public const int WS_EX_TOOLWINDOW = 0x00000080;
+    public const int WS_EX_NOACTIVATE = 0x08000000;
+
+    public static void MakeNoActivate(IntPtr hwnd) {
+        int style = GetWindowLong(hwnd, GWL_EXSTYLE);
+        SetWindowLong(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
+    }
+
     public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
     public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
     public const uint SWP_NOMOVE = 0x0002;
@@ -201,6 +216,7 @@ $window.WindowStyle = "None"
 $window.AllowsTransparency = $true
 $window.Background = [System.Windows.Media.Brushes]::Transparent
 $window.Topmost = $true
+$window.ShowActivated = $false
 $window.ShowInTaskbar = $false
 $window.SizeToContent = "Height"
 $window.Width = 350
@@ -346,10 +362,19 @@ $reflowTimer.Add_Tick({
 })
 $reflowTimer.Start()
 
+# ShowActivated alone still lets a click on the popup steal focus from the user's app.
+$window.Add_SourceInitialized({
+    try {
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $window).Handle
+        [WinSwitch]::MakeNoActivate($hwnd)
+    } catch {}
+})
+
 # Give up the slot as soon as this popup goes away.
 $window.Add_Closed({
     try { $reflowTimer.Stop() } catch {}
     Remove-Item $claimFile -Force -ErrorAction SilentlyContinue
+    $window.Dispatcher.InvokeShutdown()
 })
 
 # notify.ps1 records this popup's pid when it starts it, and clears any stale
@@ -359,7 +384,9 @@ $window.Add_Closed({
 Write-PopupLog "STARTED"
 
 try {
-    $null = $window.ShowDialog()
+    # ShowDialog activates the window regardless of ShowActivated.
+    $window.Show()
+    [System.Windows.Threading.Dispatcher]::Run()
 } catch {
     $_ | Out-File "$stateDir\popup-crash.log"
 }
