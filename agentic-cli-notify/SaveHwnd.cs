@@ -123,34 +123,49 @@ class SaveHwnd
         );
         Directory.CreateDirectory(dir);
 
-        // Try process tree first (reliable for automated launches like DevLayout)
-        IntPtr hwnd = FindWtWindowByProcessTree();
+        // Read the foreground window before the slow parent-process walk: the user may
+        // switch to another WT window a second after submitting a prompt.
+        IntPtr hwnd = GetForegroundWindow();
+        if (!IsWindowsTerminal(hwnd)) hwnd = IntPtr.Zero;
 
-        // Fall back to foreground window (works for manual setup in focused tab)
+        int tabIndex = 0;
+        string tabName = "";
+        if (hwnd != IntPtr.Zero) ReadSelectedTab(hwnd, dir, suffix, out tabIndex, out tabName);
+
+        // Fallback for automated launches (DevLayout) where WT is not yet in front.
         if (hwnd == IntPtr.Zero)
         {
-            hwnd = GetForegroundWindow();
+            hwnd = FindWtWindowByProcessTree();
             if (hwnd == IntPtr.Zero) return;
-
-            // Verify it's a WindowsTerminal window
-            uint pid;
-            GetWindowThreadProcessId(hwnd, out pid);
-            try
-            {
-                var proc = Process.GetProcessById((int)pid);
-                if (proc.ProcessName != "WindowsTerminal") return;
-            }
-            catch { return; }
+            ReadSelectedTab(hwnd, dir, suffix, out tabIndex, out tabName);
         }
 
-        // Save HWND
         File.WriteAllText(Path.Combine(dir, ".hwnd" + suffix), hwnd.ToInt64().ToString());
+        if (tabIndex > 0)
+        {
+            File.WriteAllText(Path.Combine(dir, ".tabindex" + suffix), tabIndex.ToString());
+            File.WriteAllText(Path.Combine(dir, ".tabname" + suffix), tabName);
+        }
+    }
 
-        // Find and save the currently selected tab's index (1-based)
+    static bool IsWindowsTerminal(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+        uint pid;
+        GetWindowThreadProcessId(hwnd, out pid);
         try
         {
-            File.WriteAllText(Path.Combine(dir, ".savehwnd-debug" + suffix), "starting tab enum");
+            return Process.GetProcessById((int)pid).ProcessName == "WindowsTerminal";
+        }
+        catch { return false; }
+    }
 
+    static void ReadSelectedTab(IntPtr hwnd, string dir, string suffix, out int tabIndex, out string tabName)
+    {
+        tabIndex = 0;
+        tabName = "";
+        try
+        {
             var root = AutomationElement.FromHandle(hwnd);
             var tabs = root.FindAll(TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem));
@@ -164,12 +179,9 @@ class SaveHwnd
                     var sel = (SelectionItemPattern)tab.GetCurrentPattern(SelectionItemPattern.Pattern);
                     if (sel.Current.IsSelected)
                     {
-                        File.WriteAllText(Path.Combine(dir, ".tabindex" + suffix), idx.ToString());
-                        // Also save name for display
-                        string name = tab.Current.Name ?? "";
-                        string clean = Regex.Replace(name, @"[^\x20-\x7E]", "").Trim();
-                        File.WriteAllText(Path.Combine(dir, ".tabname" + suffix), clean);
-                        break;
+                        tabIndex = idx;
+                        tabName = Regex.Replace(tab.Current.Name ?? "", @"[^\x20-\x7E]", "").Trim();
+                        return;
                     }
                 }
                 catch { }

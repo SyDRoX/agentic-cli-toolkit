@@ -24,6 +24,31 @@ if ($Agent -eq 'Claude' -and [Console]::IsInputRedirected) {
     try { $hookInput = [Console]::In.ReadToEnd() | ConvertFrom-Json } catch { }
 }
 
+# Self-heal the stored window + tab position.
+#
+# Tab index is positional, so closing or reordering a tab silently
+# invalidates it and click-to-switch then focuses the wrong tab.
+# UserPromptSubmit is the one moment this tab is provably the
+# selected tab in its window - the user just typed into it - so
+# re-capture here. Any close/reorder self-corrects on the next
+# prompt, with no fragile tab-name matching.
+#
+# save-hwnd.exe writes .hwnd-<id> / .tabindex-<id> directly when
+# given the session id, so concurrent tabs never race. It runs before
+# anything slow: a user who submits and switches windows a second later
+# would otherwise have the other window captured.
+#
+# A finished background agent also fires UserPromptSubmit, with a
+# <task-notification> prompt and nobody typing - the foreground tab
+# is then some other session's, so re-capturing would steal it.
+if ($Action -eq 'resume' -and $sessionId -ne "default") {
+    $isTaskNotification = $hookInput -and "$($hookInput.prompt)".TrimStart().StartsWith('<task-notification>')
+    $saveHwnd = "$stateDir\save-hwnd.exe"
+    if (-not $isTaskNotification -and (Test-Path $saveHwnd)) {
+        try { & $saveHwnd $sessionId 2>$null | Out-Null } catch { }
+    }
+}
+
 function Test-AsyncAgentRunning($hookInput) {
     if (-not $hookInput -or -not $hookInput.transcript_path) { return $false }
     $path = [string]$hookInput.transcript_path
@@ -149,29 +174,6 @@ try {
             Stop-SessionPopups
         }
         "resume" {
-            # Self-heal the stored window + tab position.
-            #
-            # Tab index is positional, so closing or reordering a tab silently
-            # invalidates it and click-to-switch then focuses the wrong tab.
-            # UserPromptSubmit is the one moment this tab is provably the
-            # selected tab in its window - the user just typed into it - so
-            # re-capture here. Any close/reorder self-corrects on the next
-            # prompt, with no fragile tab-name matching.
-            #
-            # save-hwnd.exe writes .hwnd-<id> / .tabindex-<id> directly when
-            # given the session id, so concurrent tabs never race.
-            #
-            # A finished background agent also fires UserPromptSubmit, with a
-            # <task-notification> prompt and nobody typing - the foreground tab
-            # is then some other session's, so re-capturing would steal it.
-            $isTaskNotification = $hookInput -and "$($hookInput.prompt)".TrimStart().StartsWith('<task-notification>')
-            if ($sessionId -ne "default" -and -not $isTaskNotification) {
-                $saveHwnd = "$stateDir\save-hwnd.exe"
-                if (Test-Path $saveHwnd) {
-                    try { & $saveHwnd $sessionId 2>$null | Out-Null } catch { }
-                }
-            }
-
             Stop-SessionFlash
             Stop-SessionPopups
         }
