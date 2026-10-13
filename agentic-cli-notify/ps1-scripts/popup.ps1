@@ -237,21 +237,42 @@ $border.Cursor = [System.Windows.Input.Cursors]::Hand
 
 $stack = New-Object System.Windows.Controls.StackPanel
 
+$windowName = ""
+$tabName = $label
+if ($label -match '^(.+?) / (.+)$') {
+    $windowName = $Matches[1]
+    $tabName = $Matches[2]
+}
+
+# Header row: agent left, window name right
+$headerRow = New-Object System.Windows.Controls.DockPanel
+
+$windowBlock = New-Object System.Windows.Controls.TextBlock
+$windowBlock.Text = $windowName
+$windowBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#cccccc")
+$windowBlock.FontSize = 13
+$windowBlock.VerticalAlignment = "Center"
+$windowBlock.Margin = [System.Windows.Thickness]::new(8, 0, 0, 0)
+[System.Windows.Controls.DockPanel]::SetDock($windowBlock, "Right")
+
 $titleBlock = New-Object System.Windows.Controls.TextBlock
-$titleBlock.Text = if ($label) { "$Agent - $label" } else { $Agent }
+$titleBlock.Text = $Agent
 $titleBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#f0883e")
 $titleBlock.FontSize = 16
 $titleBlock.FontWeight = "Bold"
-$titleBlock.TextTrimming = "CharacterEllipsis"
-$titleBlock.Margin = [System.Windows.Thickness]::new(0, 0, 0, 4)
 
-$body = New-Object System.Windows.Controls.TextBlock
-$body.Text = "Waiting for your input"
-$body.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#eaeaea")
-$body.FontSize = 14
-$body.TextWrapping = "Wrap"
+$null = $headerRow.Children.Add($windowBlock)
+$null = $headerRow.Children.Add($titleBlock)
 
-# Bottom row: hint left, dismiss right
+$tabBlock = New-Object System.Windows.Controls.TextBlock
+$tabBlock.Text = $tabName
+$tabBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#eaeaea")
+$tabBlock.FontSize = 14
+$tabBlock.FontWeight = "SemiBold"
+$tabBlock.TextTrimming = "CharacterEllipsis"
+$tabBlock.Margin = [System.Windows.Thickness]::new(0, 4, 0, 2)
+
+# Bottom row: status and hint left, dismiss right
 $bottomRow = New-Object System.Windows.Controls.DockPanel
 $bottomRow.Margin = [System.Windows.Thickness]::new(0, 4, 0, 0)
 
@@ -276,15 +297,22 @@ $closeBtn.Add_MouseLeftButtonDown({
 })
 
 $hint = New-Object System.Windows.Controls.TextBlock
-$hint.Text = "Focus this tab"
-$hint.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#888888")
 $hint.FontSize = 12
+$hint.VerticalAlignment = "Center"
+$statusRun = New-Object System.Windows.Documents.Run "Waiting for your input"
+$statusRun.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#aaaaaa")
+$statusRun.FontSize = 13
+# PowerShell 5.1 reads BOM-less scripts as ANSI, so build the dot from its code point.
+$hintRun = New-Object System.Windows.Documents.Run "  $([char]0x00B7)  Focus this tab"
+$hintRun.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#888888")
+$hint.Inlines.Add($statusRun)
+$hint.Inlines.Add($hintRun)
 
 $null = $bottomRow.Children.Add($closeBtn)
 $null = $bottomRow.Children.Add($hint)
 
-$null = $stack.Children.Add($titleBlock)
-$null = $stack.Children.Add($body)
+$null = $stack.Children.Add($headerRow)
+if ($tabName) { $null = $stack.Children.Add($tabBlock) }
 $null = $stack.Children.Add($bottomRow)
 $border.Child = $stack
 $window.Content = $border
