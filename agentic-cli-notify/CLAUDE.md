@@ -11,8 +11,9 @@ Hooks (cmd.exe) -> notify.ps1 (PowerShell) -> popup.ps1 (WPF)
   - Claude Code: `attention.cmd` / `resume.cmd` from `~/.claude/settings.json`. `notify.ps1` reads the hook JSON from stdin (Claude only). A finished
     background agent fires `UserPromptSubmit` with a `<task-notification>` prompt while the user is in another tab, so `resume` skips the hwnd/tab
     re-capture for it. `Stop` also fires when a turn ends with async agents still running, so `attention` stays silent while any transcript
-    `"isAsync":true` agentId has no matching `<task-id>` notification. Background Bash is not counted: a server that never exits would mute every
-    later Stop.
+    `"isAsync":true` agentId has no matching `<task-id>` notification, or its latest one carries the interim "background work of its own still
+    running" note (the agent notifies again when that work ends). Background Bash is not counted: a server that never exits would mute every later
+    Stop.
   - Codex: `codex-hook.ps1` from `$CODEX_HOME/hooks.json` (event read from the stdin payload)
   - Cursor Agent: `cursor-hook.ps1` from `~/.cursor/hooks.json`, events `stop` and `beforeSubmitPrompt`; the event is passed as `-Action` because the
     payload field name differs between Cursor versions

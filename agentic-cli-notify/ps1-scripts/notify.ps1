@@ -36,14 +36,17 @@ function Test-AsyncAgentRunning($hookInput) {
         $stream.Dispose()
     }
 
-    $finished = New-Object 'System.Collections.Generic.HashSet[string]'
-    foreach ($m in [regex]::Matches($text, '<task-id>([A-Za-z0-9]+)</task-id>')) {
-        $null = $finished.Add($m.Groups[1].Value)
+    # An agent that stops while its own background work runs notifies early with an
+    # interim note and notifies again later, so only its latest notification counts.
+    $isInterim = @{}
+    foreach ($m in [regex]::Matches($text, '<task-id>([A-Za-z0-9]+)</task-id>(.*?)</task-notification>')) {
+        $isInterim[$m.Groups[1].Value] = $m.Groups[2].Value -match '<note>[^<]*still running'
     }
 
     # Background Bash is ignored: a server that never exits would mute every later Stop.
     foreach ($m in [regex]::Matches($text, '"isAsync":true[^{}]*?"agentId":"([A-Za-z0-9]+)"')) {
-        if (-not $finished.Contains($m.Groups[1].Value)) { return $true }
+        $id = $m.Groups[1].Value
+        if (-not $isInterim.ContainsKey($id) -or $isInterim[$id]) { return $true }
     }
 
     return $false
