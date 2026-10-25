@@ -6,6 +6,9 @@ param(
     [string]$Agent = 'Claude'
 )
 
+# Claude Sonnet 5.5: headless claude -p children inherit the tab's WT_SESSION and would popup/re-capture for the interactive session.
+if ($Agent -eq 'Claude' -and $env:CLAUDE_CODE_SESSION_ATTENDED -eq '0') { exit 0 }
+
 # Use WT_SESSION to isolate state between terminal tabs for either CLI.
 $sessionId = $env:WT_SESSION
 if (-not $sessionId) { $sessionId = "default" }

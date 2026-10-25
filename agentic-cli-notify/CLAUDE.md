@@ -13,7 +13,8 @@ Hooks (cmd.exe) -> notify.ps1 (PowerShell) -> popup.ps1 (WPF)
     re-capture for it. `Stop` also fires when a turn ends with async agents still running, so `attention` stays silent while any transcript
     `"isAsync":true` agentId has no matching `<task-id>` notification, or its latest one carries the interim "background work of its own still
     running" note (the agent notifies again when that work ends). Background Bash is not counted: a server that never exits would mute every later
-    Stop.
+    Stop. Unattended sessions (`CLAUDE_CODE_SESSION_ATTENDED=0`, e.g. `claude -p` launched from a tab) exit at once: they inherit the tab's
+    `WT_SESSION`, so they would raise popups for it and re-capture the wrong tab.
   - Codex: `codex-hook.ps1` from `$CODEX_HOME/hooks.json` (event read from the stdin payload)
   - Cursor Agent: `cursor-hook.ps1` from `~/.cursor/hooks.json`, events `stop` and `beforeSubmitPrompt`; the event is passed as `-Action` because the
     payload field name differs between Cursor versions
