@@ -57,13 +57,32 @@ const NOTIFY_TIMEOUT_MS = 20000;
 
 let notifyQueue: Promise<void> = Promise.resolve();
 
-function notify(action: NotifyAction): void {
+// `idle` marks a resume that leaves the tab waiting for the user (start-up, an
+// aborted turn), so `notify close` does not treat the tab as mid-turn.
+function notify(action: NotifyAction, ctx?: any, idle = false): void {
   if (process.platform !== "win32") return;
   if (!sessionIsUsable()) return;
-  notifyQueue = notifyQueue.then(() => runNotifier(action));
+  const extra = sessionArguments(ctx);
+  if (idle) extra.push("-Idle");
+  notifyQueue = notifyQueue.then(() => runNotifier(action, extra));
 }
 
-function runNotifier(action: NotifyAction): Promise<void> {
+// The session id lets `notify restore` reopen this exact conversation with
+// `pi --session <id>`. Read at notify time, not at load: /resume and /new
+// swap the session under a running pi.
+function sessionArguments(ctx: any): string[] {
+  try {
+    const id = ctx?.sessionManager?.getSessionId?.();
+    if (typeof id === "string" && /^[A-Za-z0-9_.-]+$/.test(id)) {
+      return ["-ConversationId", id];
+    }
+  } catch {
+    // A missing id only costs the exact restore.
+  }
+  return [];
+}
+
+function runNotifier(action: NotifyAction, extra: string[]): Promise<void> {
   return new Promise<void>((resolve) => {
     try {
       if (!existsSync(NOTIFY_SCRIPT)) return resolve();
@@ -85,6 +104,7 @@ function runNotifier(action: NotifyAction): Promise<void> {
           action,
           "-Agent",
           "Pi",
+          ...extra,
         ],
         // No `detached`. DETACHED_PROCESS leaves powershell.exe without a
         // console and it exits immediately with code 0 without running the
@@ -108,16 +128,16 @@ export default function (pi: any) {
   // Capture the current Windows Terminal tab as soon as pi starts. Without
   // this, the first notification can be dropped because no per-session HWND
   // file exists until the first prompt is submitted.
-  pi.on("session_start", async () => {
+  pi.on("session_start", async (_event: any, ctx: any) => {
     turnInFlight = false;
     turnAborted = false;
-    notify("resume");
+    notify("resume", ctx, true);
   });
 
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (_event: any, ctx: any) => {
     turnInFlight = true;
     turnAborted = false;
-    notify("resume");
+    notify("resume", ctx);
   });
 
   // Runs started by an extension (sendMessage with triggerTurn) skip
@@ -137,7 +157,7 @@ export default function (pi: any) {
     if (event?.message?.stopReason === "aborted") turnAborted = true;
   });
 
-  pi.on("agent_settled", async () => {
+  pi.on("agent_settled", async (_event: any, ctx: any) => {
     const aborted = turnAborted;
     const started = turnInFlight;
     turnInFlight = false;
@@ -145,7 +165,8 @@ export default function (pi: any) {
     if (!started) return;
     // An abort can leave a popup from an earlier dialog on screen; clear it
     // instead of raising a new one.
-    notify(aborted ? "resume" : "attention");
+    if (aborted) notify("resume", ctx, true);
+    else notify("attention", ctx);
   });
 
   pi.on("ui_prompt_start", async () => {

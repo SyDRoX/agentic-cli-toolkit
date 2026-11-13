@@ -41,6 +41,62 @@ When multiple sessions need attention simultaneously, popups stack vertically in
 overlapping. Each live popup claims a slot in `.slots/`, so a popup that closes frees its
 place and the popups above it slide down into the gap.
 
+## The `notify` command
+
+`install.ps1` puts a `notify` command on your PATH. Type it in front of the agent you
+would have started anyway:
+
+```powershell
+notify claude --dangerously-skip-permissions
+notify codex -c model=gpt-5.6
+notify pi --model gpt-5.6-luna:medium
+```
+
+It sets up notifications for the tab it runs in (the same thing `setup.ps1` does),
+registers the tab, and starts the agent. Everything after the command name goes to the
+agent untouched. It works in any tab, including one opened with the `+` button: there is
+nothing to join, each tab registers itself. Outside Windows Terminal the agent still
+starts, without notifications.
+
+Registered tabs can be closed and brought back together:
+
+| Command | What it does |
+|---------|--------------|
+| `notify list` | Show registered tabs: agent, busy/idle, window, tab, conversation. |
+| `notify close` | Save every registered tab to a snapshot, then close those tabs. Tabs that are mid-turn block the close; `-Force` closes them anyway. `-DryRun` prints the plan. |
+| `notify restore` | Reopen the tabs of the last `close`: same windows, tab order, position and size, each on the conversation it was showing. `-Snapshot <file>` picks an older snapshot, `-DryRun` prints the plan. |
+
+What is covered: tabs started with `notify`, with the Explorer context menu, and with a
+layout preset. A tab where you typed `claude` by hand is not registered and is left alone.
+The tab you run `notify close` in always stays open. A snapshot is restored once; older
+ones stay in `.sessions/snapshots/` (the last 20).
+
+Each agent is reopened on its exact conversation, with the flags the tab was started with:
+
+| Agent | Restored with | Conversation id from |
+|-------|---------------|----------------------|
+| Claude Code | `claude --resume <id>` | hook payload `session_id` |
+| Codex | `codex resume <id>` | hook payload `session_id` |
+| pi | `pi --session <id>` | extension, `sessionManager.getSessionId()` |
+| Cursor Agent | `agent --resume <id>` | hook payload `conversation_id` |
+
+The id arrives with the first prompt. A tab that never got one is relaunched exactly as it
+was started. If an agent rejects the id (exits within 15 seconds), the tab starts again
+with its original arguments. Layout tabs are restored by rerunning their launcher, so
+Claude keeps resolving its conversation from the window slot.
+
+Limits:
+
+- A turn stopped with Escape in Claude, Codex or Cursor still counts as mid-turn until the
+  next prompt, because those agents fire no hook for it. Use `notify close -Force`.
+- A prompt passed on the command line (`notify claude "fix the build"`) is dropped on
+  restore so it is not sent twice. It is recognised by position, so a prompt that follows
+  a boolean flag the tool does not know is replayed.
+- Tab order comes from the position captured at the last prompt. Tabs dragged since then
+  come back in the old order.
+
+Tests: `ps1-scripts/Test-NotifyCli.ps1` (isolated; opens no windows).
+
 ## Requirements
 
 - Windows 10/11
@@ -198,6 +254,8 @@ agentic-cli-notify/
     popup.ps1        # WPF popup: dark theme, click-to-switch, stacking
     codex-hook.ps1   # Codex lifecycle hook adapter
     cursor-hook.ps1  # Cursor Agent lifecycle hook adapter
+    notify-cli.ps1   # The notify command (installed as bin\notify.ps1)
+    SessionRegistry.ps1  # Tab records shared by notify and the layout launchers
   SaveHwnd.cs        # C# source: captures foreground HWND + tab index
   save-hwnd.exe      # Compiled from SaveHwnd.cs (not in git, built by install)
   setup.ps1          # Per-tab setup: captures window handle + tab position
@@ -212,6 +270,10 @@ agentic-cli-notify/
 .tabindex-{WT_SESSION}      # Saved tab index (1-based) for this session
 .popup-{WT_SESSION}.pid     # Popup pid and start time per line (for cleanup)
 .slots/{screen}-{pid}.slot  # Stack slot claim: "<claimTicks>|<height>"
+.sessions/{WT_SESSION}.json   # Registered tab: command, arguments, working dir, shell pid
+.sessions/{WT_SESSION}.state  # "busy" or "idle", written by the hooks
+.sessions/{WT_SESSION}.conv   # "<Agent>|<conversation id>", written by the hooks
+.sessions/snapshots/          # What notify close saved; last.json is the next restore
 ```
 
 ## Technical Details

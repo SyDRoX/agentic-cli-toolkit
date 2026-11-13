@@ -279,5 +279,31 @@ if ($window) {
     }
 }
 
-& pi @piArgs
+# Optional agentic-cli-notify registry, so `notify close` / `notify restore`
+# cover this tab. `notify restore` passes the exact session to reopen in
+# AGENTIC_RESUME_ID; cleared here so nothing pi starts inherits it.
+$resumeId = $env:AGENTIC_RESUME_ID
+Remove-Item Env:AGENTIC_RESUME_ID -ErrorAction SilentlyContinue
+$registeredSession = $null
+$sessionRegistry = Join-Path $env:USERPROFILE ".claude\hooks\agentic-cli-notify\SessionRegistry.ps1"
+if (Test-Path $sessionRegistry) {
+    . $sessionRegistry
+    $registeredSession = Register-AgentSession -Agent Pi -Command pi -Title ($Label -replace ' / [^/]*$', '') `
+        -Launcher $PSCommandPath -LauncherArguments @($TabIndex, $Label, $WindowNum, $Model, $Effort, $ContextWindow)
+}
+
+try {
+    $resumed = $false
+    if ($resumeId) {
+        # Same flags, the exact session instead of the newest one for this repo.
+        $exactArgs = @("--session", $resumeId) + @($piArgs | Where-Object { $_ -ne "--continue" })
+        $startedAt = Get-Date
+        & pi @exactArgs
+        # Only a quick failure means the id was rejected.
+        $resumed = -not ($LASTEXITCODE -ne 0 -and ((Get-Date) - $startedAt).TotalSeconds -lt 15)
+    }
+    if (-not $resumed) { & pi @piArgs }
+} finally {
+    if ($registeredSession) { Unregister-AgentSession -SessionId $registeredSession }
+}
 exit $LASTEXITCODE

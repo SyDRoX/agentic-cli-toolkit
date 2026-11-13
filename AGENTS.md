@@ -15,7 +15,8 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 | Per-agent launchers | `launchers/launch-{claude,codex,pi,agent}.ps1` | Positional args: TabIndex, Label, WindowNum, Model, Effort, ContextWindow. Run inside the tab's working dir. |
 | Session resume | `ps1-scripts/SessionSlot.ps1`, `hooks/devlayout-session-save.ps1`, `register-session-hook.js` | Claude only. Install via `ps1-scripts/Setup-DevLayout.ps1`. Dry-run via `ps1-scripts/Test-Resume.ps1`. |
 | Notifications | `agentic-cli-notify/` | Taskbar flash + WPF popup per WT tab. Own docs: `agentic-cli-notify/README.md`, `agentic-cli-notify/CLAUDE.md`. |
-| Explorer menu | `ps1-scripts/LLM_ContextMenu_Toggle.ps1` + `LLM_ContextMenu.config.yaml` | "Open LLM CLI here" registry menu. YAML drives entries, toggles, defaults. Re-run script after YAML edits. |
+| `notify` command | `agentic-cli-notify/ps1-scripts/notify-cli.ps1` + `SessionRegistry.ps1` | On PATH after `install.ps1`. `notify <agent> [flags]` sets up notifications for the current tab and registers it; `notify list / close / restore` save, close and reopen every registered tab on its exact conversation. Covers `notify`, context-menu and layout tabs. |
+| Explorer menu | `ps1-scripts/LLM_ContextMenu_Toggle.ps1` + `LLM_ContextMenu.config.yaml` | "Open LLM CLI here" registry menu. YAML drives entries, toggles, defaults. Re-run script after YAML edits. Each entry launches through `notify`, so the tab is registered. |
 | Hotkey shortcut | `ps1-scripts/Setup-DevLayoutShortcut.ps1 [-Preset <name-or-path>] [-Desktop]` | Ctrl+Alt+D Start Menu shortcut. Opens `LayoutUI.bat`, or with `-Preset` launches that layout via `Invoke-CustomLayout.ps1` (no UI). |
 
 ## Layout JSON schema
@@ -55,6 +56,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 - Never put `;` inside a tab command: wt.exe splits on it as a tab separator.
 - `register-session-hook.js` edits only its own key in `~/.claude/settings.json`. Do not replace with a PowerShell JSON round-trip (needs PS 6+, reformats file).
 - Notification state keyed by `WT_SESSION`. Hooks outside Windows Terminal are ignored.
+- **Launchers register their tab** through the installed `SessionRegistry.ps1` (skipped when notify is not installed) and unregister in `finally`. Restore reruns the launcher with its original six arguments, so `windowNum` and tab-order rules above still decide the Claude conversation. Codex, pi and Cursor launchers take an exact conversation from `AGENTIC_RESUME_ID` and fall back to their per-working-dir resume when it is rejected; they clear the variable before starting the agent.
 
 ## Conventions
 
@@ -64,7 +66,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 - Scripts resolve paths from `$PSScriptRoot` / `$MyInvocation`; never hardcode user or checkout paths.
 - Non-interactive scripts: no `Read-Host`; take switches instead.
 - Python: `layout_ui.py` single-file UI (`model_catalog.py` stays UI-free); colors only via `ui_theme.resolve_color()`; unknown role raises.
-- Gitignored runtime output: `LayoutUI.exe`, `build/`, `__pycache__/`, `.model-cache.json`, user presets in `custom-layouts/` (except `Main.json`, `Mixed Example.json`), notify state files (`.hwnd-*`, `.tabindex-*`, `.popup-*.pid`, `.slots/`, `save-hwnd.exe`).
+- Gitignored runtime output: `LayoutUI.exe`, `build/`, `__pycache__/`, `.model-cache.json`, user presets in `custom-layouts/` (except `Main.json`, `Mixed Example.json`), notify state files (`.hwnd-*`, `.tabindex-*`, `.popup-*.pid`, `.slots/`, `.sessions/`, `save-hwnd.exe`).
 
 ## Common commands
 
@@ -85,6 +87,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\ho
 # Notification regression tests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\agentic-cli-notify\ps1-scripts\Test-CodexHooks.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\agentic-cli-notify\ps1-scripts\Test-PopupSessions.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\agentic-cli-notify\ps1-scripts\Test-NotifyCli.ps1
+
+# Launch an agent with notifications in the current tab; close / reopen all agent tabs
+notify claude --dangerously-skip-permissions
+notify close
+notify restore
 
 # Explorer context menu
 powershell -ExecutionPolicy Bypass -File .\ps1-scripts\LLM_ContextMenu_Toggle.ps1 -Mode New

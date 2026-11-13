@@ -13,5 +13,6 @@ popup-crash.log
 # Compiled binary (rebuild from SaveHwnd.cs)
 save-hwnd.exe
 .slots/
+.sessions/
 .dismiss-*
 popup-debug.log

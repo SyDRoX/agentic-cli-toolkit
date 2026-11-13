@@ -3,7 +3,13 @@ param(
     [Parameter(Position=0)]
     [string]$Action = "attention",
     [ValidateSet('Claude', 'Codex', 'Pi', 'Cursor')]
-    [string]$Agent = 'Claude'
+    [string]$Agent = 'Claude',
+    # Id of the conversation this tab is showing, when the adapter knows it.
+    # Claude's comes from the hook JSON instead.
+    [string]$ConversationId,
+    # With `resume`: the tab is waiting for the user, not working. pi sends
+    # resume on start-up and after an aborted turn, where no turn is running.
+    [switch]$Idle
 )
 
 # Claude Sonnet 5.5: headless claude -p children inherit the tab's WT_SESSION and would popup/re-capture for the interactive session.
@@ -50,6 +56,23 @@ if ($Action -eq 'resume' -and $sessionId -ne "default") {
     if (-not $isTaskNotification -and (Test-Path $saveHwnd)) {
         try { & $saveHwnd $sessionId 2>$null | Out-Null } catch { }
     }
+}
+
+function Set-SessionActivity([string]$State) {
+    # Feed `notify close` / `notify restore`: whether this tab is mid-turn, and
+    # which conversation to reopen. Only tabs with a registry record are tracked.
+    # Side files rather than the record itself: see SessionRegistry.ps1.
+    try {
+        if ($sessionId -notmatch '^[A-Za-z0-9-]+$') { return }
+        $registryDir = "$stateDir\.sessions"
+        if (-not (Test-Path "$registryDir\$sessionId.json")) { return }
+        if ($State) { [IO.File]::WriteAllText("$registryDir\$sessionId.state", $State) }
+        $conversation = $ConversationId
+        if (-not $conversation -and $hookInput) { $conversation = [string]$hookInput.session_id }
+        if ($conversation -match '^[A-Za-z0-9_.-]+$') {
+            [IO.File]::WriteAllText("$registryDir\$sessionId.conv", "$Agent|$conversation")
+        }
+    } catch { }
 }
 
 function Test-AsyncAgentRunning($hookInput) {
@@ -173,10 +196,13 @@ try {
             # The prompt that raised the popup went away without the user
             # necessarily being in this tab (a dialog that timed out), so close
             # the popup but do not re-capture the selected tab like resume does.
+            # Only pi sends this, and only inside a turn that now carries on.
+            Set-SessionActivity 'busy'
             Stop-SessionFlash
             Stop-SessionPopups
         }
         "resume" {
+            Set-SessionActivity $(if ($Idle) { 'idle' } else { 'busy' })
             Stop-SessionFlash
             Stop-SessionPopups
         }
@@ -184,7 +210,11 @@ try {
             # Stop also fires when a turn ends with agents still working in the background.
             $isAgentRunning = $false
             try { $isAgentRunning = Test-AsyncAgentRunning $hookInput } catch { }
-            if ($isAgentRunning) { exit 0 }
+            if ($isAgentRunning) {
+                Set-SessionActivity $null
+                exit 0
+            }
+            Set-SessionActivity 'idle'
 
             # Read saved HWND for this session
             $hwnd = [IntPtr]::Zero
