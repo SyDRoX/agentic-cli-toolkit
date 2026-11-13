@@ -23,6 +23,24 @@ foreach ($eventName in @('Stop', 'UserPromptSubmit')) {
         if ($settings.hooks.$eventName -isnot [array]) { throw "$eventName must be an array." }
         $entries = @($settings.hooks.$eventName)
     }
+    # The project used to install as "claude-notify". A hook left over from that
+    # install runs next to this one and raises every popup twice.
+    $kept = @()
+    foreach ($entry in $entries) {
+        $handlers = @($entry.hooks | Where-Object { $_.command -notmatch '[\\/]claude-notify[\\/]codex-hook\.ps1' })
+        if ($handlers.Count -eq @($entry.hooks).Count) { $kept += $entry; continue }
+        $changed = $true
+        Write-Host "Removed the old claude-notify hook from $eventName."
+        if ($handlers.Count -gt 0) {
+            $entry.hooks = $handlers
+            $kept += $entry
+        }
+    }
+    if ($kept.Count -ne $entries.Count -or $changed) {
+        $settings.hooks | Add-Member -NotePropertyName $eventName -NotePropertyValue $kept -Force
+    }
+    $entries = $kept
+
     $found = $false
     foreach ($entry in $entries) {
         foreach ($handler in $entry.hooks) {

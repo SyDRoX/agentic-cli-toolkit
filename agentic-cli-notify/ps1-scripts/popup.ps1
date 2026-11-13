@@ -124,6 +124,30 @@ if (Test-Path $labelFile) {
     if ($label) { $label = $label.Trim() }
 }
 
+# The shell of a registered tab (see SessionRegistry.ps1). A popup for a tab the
+# user closed has nothing left to focus, so it goes away with the tab. Tabs
+# without a registry record are not tracked and count as alive.
+$tabShellPid = 0
+$tabShellTicks = ''
+try {
+    $recordFile = "$stateDir\.sessions\$SessionId.json"
+    if (Test-Path $recordFile) {
+        $record = Get-Content $recordFile -Raw | ConvertFrom-Json
+        $tabShellPid = [int]$record.shellPid
+        $tabShellTicks = [string]$record.shellStartTicks
+    }
+} catch { $tabShellPid = 0 }
+
+function Test-TabShellAlive {
+    if ($tabShellPid -le 0) { return $true }
+    try {
+        $shell = Get-Process -Id $tabShellPid -ErrorAction SilentlyContinue
+        if (-not $shell) { return $false }
+        # Windows reuses process ids: the start time must match too.
+        return ($shell.StartTime.ToUniversalTime().Ticks.ToString() -eq $tabShellTicks)
+    } catch { return $true }
+}
+
 $popupGap = 8
 $popupMargin = 20
 $defaultHeight = 100
@@ -350,6 +374,9 @@ $dismissTimer.Interval = [TimeSpan]::FromMilliseconds(500)
 $dismissTimer.Add_Tick({
     if (Test-Path $dismissFile) {
         Write-PopupLog "DISMISS_SIGNAL detected, closing"
+        $window.Close()
+    } elseif (-not (Test-TabShellAlive)) {
+        Write-PopupLog "TAB_GONE, closing"
         $window.Close()
     }
 })

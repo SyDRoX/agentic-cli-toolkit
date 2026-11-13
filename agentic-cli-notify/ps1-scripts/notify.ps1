@@ -216,6 +216,23 @@ try {
             }
             Set-SessionActivity 'idle'
 
+            # The stored window and tab position date from the last prompt. A tab
+            # reordered, dragged to another window or shifted by a closed
+            # neighbour since then is found again here, so the popup names and
+            # focuses the right tab. Only registered tabs: the lookup needs a
+            # process that runs in the tab, which the registry record names.
+            try {
+                $recordFile = "$stateDir\.sessions\$sessionId.json"
+                $locator = "$stateDir\save-hwnd.exe"
+                if ($sessionId -match '^[A-Za-z0-9-]+$' -and (Test-Path $recordFile) -and (Test-Path $locator)) {
+                    $shellPid = [int](Get-Content $recordFile -Raw | ConvertFrom-Json).shellPid
+                    if ($shellPid -gt 0) {
+                        $locate = Start-Process -FilePath $locator -ArgumentList '--locate', "${sessionId}:$shellPid" -WindowStyle Hidden -PassThru
+                        if (-not $locate.WaitForExit(4000)) { try { $locate.Kill() } catch { } }
+                    }
+                }
+            } catch { }
+
             # Read saved HWND for this session
             $hwnd = [IntPtr]::Zero
             if (Test-Path $hwndFile) {
@@ -245,6 +262,11 @@ try {
                     )
                     if ($tabIdx -ge 1 -and $tabIdx -le $tabs.Count) {
                         $rawName = $tabs[$tabIdx - 1].Current.Name
+                        # The lookup above may still be on screen as the tab's
+                        # name; it saved the real title next to the position.
+                        if ($rawName -match 'ntfy-[0-9a-f]{12}') {
+                            $rawName = [string](Get-Content "$stateDir\.tabname-$sessionId" -Raw -ErrorAction SilentlyContinue)
+                        }
                         # Agents prefix the tab with a glyph - pi uses a pi
                         # character, so "pi - PotatoSandwich". Dropping the
                         # non-ASCII glyph leaves the separator behind and the

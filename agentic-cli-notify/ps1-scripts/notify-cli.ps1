@@ -12,6 +12,7 @@ Installed as bin\notify.ps1 and put on PATH by install.ps1, so it is typed as:
     notify list
     notify close [-Force] [-DryRun]
     notify restore [-Snapshot <file>] [-DryRun]
+    notify reopen [count] [-All] [-DryRun]
 
 Everything after the command name is handed to the agent untouched. That is why
 this script has no param() block: PowerShell would bind flags such as -c or -r
@@ -53,6 +54,8 @@ function Show-Usage {
     Write-Host 'notify close [-Force] [-DryRun]   save and close every registered agent tab'
     Write-Host 'notify restore [-Snapshot <file>] [-DryRun]'
     Write-Host '                                  reopen the tabs saved by the last close'
+    Write-Host 'notify reopen [count] [-All] [-DryRun]'
+    Write-Host '                                  reopen tabs closed with X (or lost to a crash) in this window'
     Write-Host ''
     Write-Host 'Examples:'
     Write-Host '  notify claude --dangerously-skip-permissions'
@@ -69,6 +72,75 @@ function Get-AgentKind {
         'cursor-agent' { return 'Cursor' }
     }
     return 'Other'
+}
+
+# ---------------------------------------------------------------------------
+# Tab positions
+# ---------------------------------------------------------------------------
+
+function Update-SessionLocations {
+    <#
+    .SYNOPSIS
+        Rewrite the stored window and tab position of tabs from where they are now.
+    .DESCRIPTION
+        The stored position goes stale when tabs are reordered, closed or dragged
+        to another window. save-hwnd.exe --locate finds each tab again through a
+        marker title; see SaveHwnd.cs. Tabs it cannot find keep their old values.
+    .PARAMETER Pairs
+        "<session>:<pid of a process in that tab>" each.
+    #>
+    param([string[]]$Pairs, [switch]$NoWait)
+    try {
+        $locator = Join-Path $notifyDir 'save-hwnd.exe'
+        if (-not $Pairs -or $Pairs.Count -eq 0 -or -not (Test-Path -LiteralPath $locator)) { return }
+        $arguments = @('--locate') + $Pairs
+        if ($NoWait) {
+            $null = Start-Process -FilePath $locator -ArgumentList $arguments -WindowStyle Hidden
+        } else {
+            $process = Start-Process -FilePath $locator -ArgumentList $arguments -WindowStyle Hidden -PassThru
+            if (-not $process.WaitForExit(8000)) { try { $process.Kill() } catch { } }
+        }
+    } catch { }
+}
+
+function Get-LocatedSessions {
+    # Registered tabs with their position read back from Windows Terminal.
+    $sessions = @(Get-AgentSessions)
+    if ($sessions.Count -eq 0) { return ,@() }
+    Update-SessionLocations -Pairs @($sessions | ForEach-Object { "$($_.sessionId):$($_.shellPid)" })
+    return ,@(Get-AgentSessions)
+}
+
+function Clear-StaleNotifyFiles {
+    # Hook state of tabs that no longer exist. Tabs with a registry record are
+    # cleaned when their record goes; this covers tabs that never had one.
+    try {
+        Initialize-NotifyWin32
+        $registryDir = Get-SessionRegistryDir
+        $hasRecord = { param($id) Test-Path -LiteralPath (Join-Path $registryDir "$id.json") }
+
+        foreach ($file in (Get-ChildItem -LiteralPath $notifyDir -Filter '.hwnd-*' -File -Force -ErrorAction SilentlyContinue)) {
+            $sessionId = $file.Name.Substring(6)
+            if (-not (Test-SessionKey $sessionId) -or (& $hasRecord $sessionId)) { continue }
+            $handle = [long]0
+            $null = [long]::TryParse([string](Read-RegistryValue $file.FullName), [ref]$handle)
+            if ($handle -ne 0 -and [AgenticNotifyWin]::IsWindow([IntPtr]::new($handle))) { continue }
+            Remove-SessionSideFiles -SessionId $sessionId
+        }
+
+        # Leftovers without a window handle: nothing can use them, but give a
+        # tab that is being set up right now a day before taking its files.
+        $cutoff = (Get-Date).AddDays(-1)
+        foreach ($prefix in @('.tabindex-', '.tabname-', '.label-', '.popup-', '.dismiss-', '.cooldown-', '.savehwnd-debug-')) {
+            foreach ($file in (Get-ChildItem -LiteralPath $notifyDir -Filter "$prefix*" -File -Force -ErrorAction SilentlyContinue)) {
+                if ($file.LastWriteTime -gt $cutoff) { continue }
+                $sessionId = $file.Name.Substring($prefix.Length) -replace '\.pid$', ''
+                if (-not (Test-SessionKey $sessionId) -or (& $hasRecord $sessionId)) { continue }
+                if (Test-Path -LiteralPath (Join-Path $notifyDir ".hwnd-$sessionId")) { continue }
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch { }
 }
 
 # ---------------------------------------------------------------------------
@@ -134,6 +206,9 @@ function Start-RegisteredAgent {
     if (Test-SessionKey $env:WT_SESSION) {
         Invoke-TabSetup -TabIndex $TabIndex -Hwnd $Hwnd
         $registered = Register-AgentSession -Agent $kind -Command $Command -Arguments $RecordArguments
+        # The capture above trusts the foreground window or the caller's numbers.
+        # Confirm the real position in the background; the agent does not wait.
+        if ($registered) { Update-SessionLocations -Pairs @("${registered}:$PID") -NoWait }
         if ($kind -eq 'Other') {
             Write-Host "notify: tab registered. '$Command' has no notification adapter, so no popups." -ForegroundColor DarkGray
         } else {
@@ -236,22 +311,46 @@ public static class AgenticNotifyWin {
 # ---------------------------------------------------------------------------
 
 function Invoke-List {
-    $sessions = @(Get-AgentSessions)
+    $sessions = Get-LocatedSessions
+    Clear-StaleNotifyFiles
     if ($sessions.Count -eq 0) {
         Write-Host 'notify: no registered agent tabs.'
-        return
+    } else {
+        $sessions | Sort-Object hwnd, tabIndex | ForEach-Object {
+            [pscustomobject]@{
+                Agent        = $_.agent
+                State        = $_.state
+                Window       = if ($_.hwnd) { $_.hwnd } else { '?' }
+                Tab          = if ($_.tabIndex) { $_.tabIndex } else { '?' }
+                Conversation = if ($_.conversation) { $_.conversation } else { '-' }
+                Source       = if ($_.launcher) { 'layout' } else { 'notify' }
+                Directory    = $_.cwd
+            }
+        } | Format-Table -AutoSize | Out-Host
     }
-    $sessions | Sort-Object hwnd, tabIndex | ForEach-Object {
-        [pscustomobject]@{
-            Agent        = $_.agent
-            State        = $_.state
-            Window       = if ($_.hwnd) { $_.hwnd } else { '?' }
-            Tab          = if ($_.tabIndex) { $_.tabIndex } else { '?' }
-            Conversation = if ($_.conversation) { $_.conversation } else { '-' }
-            Source       = if ($_.launcher) { 'layout' } else { 'notify' }
-            Directory    = $_.cwd
-        }
-    } | Format-Table -AutoSize | Out-Host
+
+    $closed = @(Get-ClosedSessions)
+    if ($closed.Count -gt 0) {
+        Write-Host 'Closed while the agent was running (newest first; notify reopen [count]):'
+        $number = 0
+        $closed | ForEach-Object {
+            $number++
+            $closedAt = ''
+            try {
+                # PowerShell 7 hands a JSON timestamp back as a DateTime, 5.1 as text.
+                $stamp = $_.closedUtc
+                if ($stamp -isnot [DateTime]) { $stamp = [DateTime]::Parse([string]$stamp, [Globalization.CultureInfo]::InvariantCulture, 'RoundtripKind') }
+                $closedAt = $stamp.ToLocalTime().ToString('MM-dd HH:mm')
+            } catch { }
+            [pscustomobject]@{
+                '#'          = $number
+                Agent        = $_.agent
+                Noticed      = $closedAt
+                Conversation = if ($_.conversation) { $_.conversation } else { '-' }
+                Directory    = $_.cwd
+            }
+        } | Format-Table -AutoSize | Out-Host
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -344,7 +443,10 @@ function Invoke-Close {
     param([bool]$Force, [bool]$DryRun)
 
     Initialize-NotifyWin32
-    $sessions = @(Get-AgentSessions)
+    # Positions as they are now: the snapshot must keep tabs the user reordered
+    # or dragged to another window where they ended up.
+    $sessions = Get-LocatedSessions
+    Clear-StaleNotifyFiles
     if ($sessions.Count -eq 0) {
         Write-Host 'notify: no registered agent tabs to close.'
         return
@@ -469,9 +571,7 @@ function Invoke-Close {
         }
         $sessionId = [string]$target.Session.sessionId
         Unregister-AgentSession -SessionId $sessionId
-        foreach ($prefix in @('.hwnd-', '.tabindex-', '.tabname-', '.label-')) {
-            Remove-Item -LiteralPath (Join-Path $notifyDir "$prefix$sessionId") -Force -ErrorAction SilentlyContinue
-        }
+        Remove-SessionSideFiles -SessionId $sessionId
     }
 
     Write-Host "notify: closed $closed of $($targets.Count) tab(s) in $($windows.Count) window(s)." -ForegroundColor Green
@@ -501,6 +601,22 @@ $script:InheritedSessionVars = @(
     'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN',
     'CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT'
 )
+
+function Remove-InheritedSessionVars {
+    # Returns what was removed, for the caller to put back.
+    $removed = @{}
+    foreach ($name in $script:InheritedSessionVars) {
+        $value = [Environment]::GetEnvironmentVariable($name, 'Process')
+        if ($null -eq $value) { continue }
+        $persisted = [Environment]::GetEnvironmentVariable($name, 'User')
+        if ($null -eq $persisted) { $persisted = [Environment]::GetEnvironmentVariable($name, 'Machine') }
+        if ($null -eq $persisted) {
+            $removed[$name] = $value
+            Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+        }
+    }
+    return $removed
+}
 
 function Invoke-Restore {
     param([string]$SnapshotPath, [bool]$DryRun)
@@ -539,18 +655,7 @@ function Invoke-Restore {
     if (-not $DryRun) { Initialize-NotifyWin32 }
 
     $savedEnvironment = @{}
-    if (-not $DryRun) {
-        foreach ($name in $script:InheritedSessionVars) {
-            $value = [Environment]::GetEnvironmentVariable($name, 'Process')
-            if ($null -eq $value) { continue }
-            $persisted = [Environment]::GetEnvironmentVariable($name, 'User')
-            if ($null -eq $persisted) { $persisted = [Environment]::GetEnvironmentVariable($name, 'Machine') }
-            if ($null -eq $persisted) {
-                $savedEnvironment[$name] = $value
-                Remove-Item "Env:$name" -ErrorAction SilentlyContinue
-            }
-        }
-    }
+    if (-not $DryRun) { $savedEnvironment = Remove-InheritedSessionVars }
 
     try {
         $tabTotal = 0
@@ -646,6 +751,90 @@ function Invoke-Restore {
     }
 }
 
+function Invoke-Reopen {
+    <#
+    .SYNOPSIS
+        Bring back the tabs most recently closed under a running agent, as new
+        tabs of the window this command runs in.
+    #>
+    param([int]$Count, [bool]$All, [bool]$DryRun)
+
+    # Notice tabs that were closed since the last command.
+    $null = Get-AgentSessions
+    $closed = @(Get-ClosedSessions)
+    if ($closed.Count -eq 0) {
+        Write-Host 'notify: no closed agent tabs to reopen.'
+        return
+    }
+    if ($All) { $Count = $closed.Count }
+    if ($Count -lt 1) { $Count = 1 }
+    $chosen = @($closed | Select-Object -First $Count)
+    # Oldest first, so the tabs come back in the order they were lost.
+    [array]::Reverse($chosen)
+
+    $tabs = @($chosen | ForEach-Object {
+        [ordered]@{
+            agent        = $_.agent
+            command      = $_.command
+            args         = @($_.args)
+            cwd          = $_.cwd
+            shell        = $_.shell
+            title        = $_.title
+            launcher     = $_.launcher
+            launcherArgs = @($_.launcherArgs)
+            conversation = $_.conversation
+        }
+    })
+
+    if ($DryRun) {
+        Write-Host "notify reopen (dry run): $($tabs.Count) tab(s)"
+        foreach ($tab in $tabs) {
+            if ($tab.launcher) {
+                Write-Host "  $(Split-Path $tab.launcher -Leaf) $(@($tab.launcherArgs) -join ' ')  [$($tab.cwd)]"
+            } else {
+                $resume = Get-AgentResumeArguments -Agent $tab.agent -Arguments @($tab.args) -ConversationId $tab.conversation
+                Write-Host "  $($tab.command) $($resume -join ' ')  [$($tab.cwd)]"
+            }
+        }
+        Write-Host 'Dry run: nothing launched.' -ForegroundColor Yellow
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $snapshotDir)) { $null = New-Item -ItemType Directory -Path $snapshotDir -Force }
+    $snapshotPath = Join-Path $snapshotDir ("reopen-" + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + ".json")
+    $snapshot = [ordered]@{
+        version    = 1
+        createdUtc = [DateTime]::UtcNow.ToString('o')
+        windows    = @([ordered]@{ hwnd = 0; maximized = $false; rect = $null; tabs = $tabs })
+    }
+    Write-RegistryText $snapshotPath ($snapshot | ConvertTo-Json -Depth 8)
+
+    $ownShell = (Get-Process -Id $PID).Path
+    $segments = @()
+    for ($t = 0; $t -lt $tabs.Count; $t++) {
+        $tab = $tabs[$t]
+        $shell = if ($tab.shell -and (Test-Path -LiteralPath $tab.shell)) { [string]$tab.shell } else { $ownShell }
+        # "-w 0" is the window this command was typed in.
+        $lead = if ($t -eq 0) { '-w 0 new-tab' } else { 'new-tab' }
+        $title = if ($tab.title) { " --title `"$(ConvertTo-WtText ([string]$tab.title))`"" } else { '' }
+        $command = "& $(ConvertTo-PsLiteral $PSCommandPath) __resume $(ConvertTo-PsLiteral $snapshotPath) 0 $t reopen"
+        $directory = ([string]$tab.cwd).TrimEnd('\')
+        if ($directory -match '^[A-Za-z]:$') { $directory += '\.' }
+        $segments += "$lead$title -d `"$(ConvertTo-WtText $directory)`" `"$shell`" -NoExit -ExecutionPolicy Bypass -Command `"$(ConvertTo-WtText $command)`""
+    }
+
+    $savedEnvironment = Remove-InheritedSessionVars
+    try {
+        Start-Process (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\wt.exe') -ArgumentList ($segments -join ' ; ')
+    } finally {
+        foreach ($name in $savedEnvironment.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
+        }
+    }
+    foreach ($entry in $chosen) { Remove-Item -LiteralPath $entry.path -Force -ErrorAction SilentlyContinue }
+    Write-Host "notify: reopened $($tabs.Count) tab(s)." -ForegroundColor Green
+}
+
 function Invoke-ResumeTab {
     # Runs inside each restored tab.
     param([string]$SnapshotPath, [int]$WindowIndex, [int]$TabNumber, [string]$Token)
@@ -657,18 +846,23 @@ function Invoke-ResumeTab {
         return
     }
 
-    # The restore command writes the new window's handle once the window is up.
     $hwnd = $null
-    $hwndFile = Join-Path (Get-SessionRegistryDir) "restore-$Token-$WindowIndex.hwnd"
-    for ($i = 0; $i -lt 50; $i++) {
-        if (Test-Path -LiteralPath $hwndFile) {
-            $hwnd = (Get-Content -LiteralPath $hwndFile -Raw -ErrorAction SilentlyContinue)
-            if ($hwnd) { $hwnd = $hwnd.Trim() }
-            if ($hwnd) { break }
+    $position = $null
+    if ($Token -ne 'reopen') {
+        # The restore command writes the new window's handle once the window is up.
+        $hwndFile = Join-Path (Get-SessionRegistryDir) "restore-$Token-$WindowIndex.hwnd"
+        for ($i = 0; $i -lt 50; $i++) {
+            if (Test-Path -LiteralPath $hwndFile) {
+                $hwnd = (Get-Content -LiteralPath $hwndFile -Raw -ErrorAction SilentlyContinue)
+                if ($hwnd) { $hwnd = $hwnd.Trim() }
+                if ($hwnd) { break }
+            }
+            Start-Sleep -Milliseconds 200
         }
-        Start-Sleep -Milliseconds 200
+        $position = [string]($TabNumber + 1)
     }
-    $position = [string]($TabNumber + 1)
+    # A reopened tab joins an existing window at an unknown position: it is
+    # captured like a tab the user started by hand.
 
     if ($tab.launcher) {
         if (-not (Test-Path -LiteralPath $tab.launcher)) {
@@ -677,7 +871,7 @@ function Invoke-ResumeTab {
         }
         # The launcher registers the tab itself. Claude resolves its conversation
         # from its window slot; the others take the exact id from here.
-        if ($hwnd) { Invoke-TabSetup -TabIndex $position -Hwnd $hwnd }
+        if ($hwnd) { Invoke-TabSetup -TabIndex $position -Hwnd $hwnd } elseif ($Token -eq 'reopen') { Invoke-TabSetup }
         if ($tab.conversation -and $tab.agent -ne 'Claude') { $env:AGENTIC_RESUME_ID = [string]$tab.conversation }
         try {
             $launcherArguments = @($tab.launcherArgs)
@@ -722,6 +916,16 @@ try {
             Invoke-Restore -SnapshotPath $snapshotArgument -DryRun ($rest -contains '-DryRun')
             break
         }
+        'reopen' {
+            $count = 1
+            foreach ($argument in $rest) {
+                $parsed = 0
+                if ([int]::TryParse($argument, [ref]$parsed)) { $count = $parsed }
+            }
+            Invoke-Reopen -Count $count -All ($rest -contains '-All') -DryRun ($rest -contains '-DryRun')
+            break
+        }
+        '__sweep' { $null = Get-AgentSessions; Clear-StaleNotifyFiles; break }
         '__resume' {
             Invoke-ResumeTab -SnapshotPath $rest[0] -WindowIndex ([int]$rest[1]) -TabNumber ([int]$rest[2]) -Token $rest[3]
             break

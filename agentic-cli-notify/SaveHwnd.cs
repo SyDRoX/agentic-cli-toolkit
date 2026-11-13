@@ -114,13 +114,144 @@ class SaveHwnd
         try { Run(args); } catch { }
     }
 
-    static void Run(string[] args)
+    [DllImport("kernel32.dll")]
+    static extern bool FreeConsole();
+
+    [DllImport("kernel32.dll")]
+    static extern bool AttachConsole(uint processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    static extern bool SetConsoleTitle(string title);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetConsoleTitle(StringBuilder title, int size);
+
+    static string StateDir()
     {
-        string suffix = Suffix(args);
-        string dir = Path.Combine(
+        // Tests point the whole notifier at a scratch directory.
+        string overridden = Environment.GetEnvironmentVariable("AGENTIC_NOTIFY_DIR");
+        if (!string.IsNullOrEmpty(overridden)) return overridden;
+        return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".claude", "hooks", "agentic-cli-notify"
         );
+    }
+
+    static List<IntPtr> TerminalWindows()
+    {
+        var windows = new List<IntPtr>();
+        EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
+        {
+            if (IsWindowVisible(hWnd) && GetWindowTextLength(hWnd) > 0 && IsWindowsTerminal(hWnd)) windows.Add(hWnd);
+            return true;
+        }, IntPtr.Zero);
+        return windows;
+    }
+
+    class Probe
+    {
+        public string Session;
+        public uint ProcessId;
+        public string Marker;
+        public string OldTitle;
+        public bool Found;
+    }
+
+    // save-hwnd.exe --locate <session>:<pid> [<session>:<pid> ...]
+    //
+    // Finds where each tab is right now, whichever tab is selected and whichever
+    // window it was dragged to. Windows Terminal exposes no tab identity, so the
+    // tab is made to identify itself: a process attached to its console gets a
+    // marker as console title, the marker shows up as the tab's name, and the
+    // old title is put back. <pid> is any process running in the tab.
+    //
+    // Nothing is written for a tab whose marker never shows (a tab the user
+    // renamed, or suppressApplicationTitle): the files of the last capture stay.
+    static void Locate(string[] args)
+    {
+        string dir = StateDir();
+        var probes = new List<Probe>();
+        for (int i = 1; i < args.Length; i++)
+        {
+            string[] parts = args[i].Split(':');
+            uint pid;
+            if (parts.Length != 2 || !uint.TryParse(parts[1], out pid)) continue;
+            string session = Regex.Replace(parts[0], @"[^A-Za-z0-9_-]", "");
+            if (session.Length == 0) continue;
+            probes.Add(new Probe { Session = session, ProcessId = pid });
+        }
+        if (probes.Count == 0) return;
+
+        FreeConsole();
+        var active = new List<Probe>();
+        foreach (Probe probe in probes)
+        {
+            if (!AttachConsole(probe.ProcessId)) continue;
+            var title = new StringBuilder(2048);
+            GetConsoleTitle(title, title.Capacity);
+            probe.OldTitle = title.ToString();
+            probe.Marker = "ntfy-" + Guid.NewGuid().ToString("N").Substring(0, 12);
+            SetConsoleTitle(probe.Marker);
+            FreeConsole();
+            active.Add(probe);
+        }
+
+        try
+        {
+            var condition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
+            var watch = Stopwatch.StartNew();
+            int missing = active.Count;
+            while (missing > 0 && watch.ElapsedMilliseconds < 2000)
+            {
+                foreach (IntPtr window in TerminalWindows())
+                {
+                    try
+                    {
+                        var tabs = AutomationElement.FromHandle(window).FindAll(TreeScope.Descendants, condition);
+                        for (int index = 0; index < tabs.Count; index++)
+                        {
+                            string name = tabs[index].Current.Name ?? "";
+                            foreach (Probe probe in active)
+                            {
+                                if (probe.Found || name.IndexOf(probe.Marker, StringComparison.Ordinal) < 0) continue;
+                                probe.Found = true;
+                                missing--;
+                                File.WriteAllText(Path.Combine(dir, ".hwnd-" + probe.Session), window.ToInt64().ToString());
+                                File.WriteAllText(Path.Combine(dir, ".tabindex-" + probe.Session), (index + 1).ToString());
+                                File.WriteAllText(Path.Combine(dir, ".tabname-" + probe.Session),
+                                    Regex.Replace(probe.OldTitle, @"[^\x20-\x7E]", "").Trim());
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                if (missing > 0) System.Threading.Thread.Sleep(40);
+            }
+        }
+        finally
+        {
+            foreach (Probe probe in active)
+            {
+                if (!AttachConsole(probe.ProcessId)) continue;
+                // The agent may have set a title of its own in the meantime: keep that one.
+                var title = new StringBuilder(2048);
+                GetConsoleTitle(title, title.Capacity);
+                if (title.ToString().IndexOf(probe.Marker, StringComparison.Ordinal) >= 0) SetConsoleTitle(probe.OldTitle);
+                FreeConsole();
+            }
+        }
+    }
+
+    static void Run(string[] args)
+    {
+        if (args != null && args.Length > 1 && args[0] == "--locate")
+        {
+            Locate(args);
+            return;
+        }
+
+        string suffix = Suffix(args);
+        string dir = StateDir();
         Directory.CreateDirectory(dir);
 
         // Read the foreground window before the slow parent-process walk: the user may

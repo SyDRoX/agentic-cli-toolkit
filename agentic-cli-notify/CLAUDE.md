@@ -72,6 +72,16 @@ All runtime state is in `~/.claude/hooks/agentic-cli-notify/`, keyed by `WT_SESS
 - `notify restore` opens one `wt -w new` per saved window; each tab runs `notify.ps1 __resume <snapshot> <window> <tab> <token>` and waits for
   `.sessions/restore-<token>-<window>.hwnd`, which the restore command writes once the window exists. Layout tabs rerun their launcher with the
   original six arguments and get the exact conversation in `AGENTIC_RESUME_ID` (Codex, pi, Cursor; Claude uses its slot).
+- Tab positions are re-read, not trusted: `save-hwnd.exe --locate <session>:<pid> ...` attaches to each tab's console, sets a marker title,
+  finds the marker among the TabItems of every WT window, restores the title and rewrites `.hwnd-` / `.tabindex-` / `.tabname-`. This is the
+  only way to find a tab that is not selected, and it survives reorder and a move to another window (a UI Automation `RuntimeId` does not:
+  WT builds a new tab object in the target window). Callers: `notify.ps1` before a popup (registered tabs only; it needs the record's shell
+  pid), `notify list`, `notify close`, and a background run at launch. A tab whose marker never shows keeps its old files.
+- A record whose shell is dead was not unregistered, so its tab was closed under the agent: closing a tab never runs the launcher's `finally`
+  (verified on PowerShell 5.1 and 7). `Get-AgentSessions` moves such a record to `.sessions/closed/` (last 30) and deletes the tab's side
+  files. `notify reopen` opens those in the current window (`wt -w 0 new-tab`) through the same `__resume` path, token `reopen`.
+  `notify close` unregisters directly, so tabs it closes never land on the closed list.
+- `popup.ps1` closes itself when the shell of its registered tab is gone.
 - `Get-AgentResumeArguments` strips each CLI's session flags case-sensitively (Codex `-c` is config, `-C` is the directory; pi `-c` is continue).
 - `AGENTIC_NOTIFY_DIR` overrides the state directory. Tests rely on it; nothing else should set it.
 

@@ -133,7 +133,26 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
 } else {
     Write-Host ''
     Write-Host "Settings file exists at $settingsFile"
+
+    # The project used to install as "claude-notify". Hooks still pointing there
+    # run the old copy. Edited as text: a JSON round-trip through PowerShell 5.1
+    # would reformat the whole file.
+    $settingsText = [IO.File]::ReadAllText($settingsFile)
+    $legacyPattern = '(?<=[\\/]hooks[\\/]+)claude-notify(?=[\\/]+(attention|resume)\.cmd)'
+    if ($settingsText -match $legacyPattern) {
+        if ($settingsText -match '[\\/]agentic-cli-notify[\\/]+(attention|resume)\.cmd') {
+            Write-Warning 'settings.json registers both the old claude-notify hooks and the current ones. Delete the claude-notify entries, or every popup shows twice.'
+        } else {
+            $backup = "$settingsFile.bak-agentic-cli-notify-$([guid]::NewGuid().ToString('N'))"
+            Copy-Item -LiteralPath $settingsFile -Destination $backup
+            [IO.File]::WriteAllText($settingsFile, [regex]::Replace($settingsText, $legacyPattern, 'agentic-cli-notify'), (New-Object Text.UTF8Encoding($false)))
+            Write-Host "Repointed the old claude-notify hooks to this install. Backup: $backup"
+        }
+    }
 }
+
+# Drop state files of tabs that no longer exist.
+try { & (Join-Path $binDir 'notify.ps1') __sweep } catch { }
 Write-Host ''
 Write-Host 'Ensure settings.json has the following hooks registered:'
 Write-Host ''
@@ -153,9 +172,10 @@ Write-Host '  4. Repeat for every Claude Code tab'
 Write-Host ''
 Write-Host 'Re-run setup.ps1 after: WT restart, tab reorder, adding/removing tabs.'
 Write-Host ''
-Write-Host 'Or start the agent through the notify command, which does the setup for you:'
+Write-Host 'Or start the agent through the notify command, which does the setup for you'
+Write-Host 'and follows the tab when it is reordered or dragged to another window:'
 Write-Host '  notify claude --dangerously-skip-permissions'
-Write-Host '  notify list | notify close | notify restore'
+Write-Host '  notify list | notify close | notify restore | notify reopen'
 Write-Host ''
 Write-Host 'Other agents:'
 Write-Host '  Codex  - run /hooks in Codex to trust the two notification hooks'

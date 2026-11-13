@@ -100,8 +100,41 @@ $global:LASTEXITCODE = 0
     $dead.sessionId = 'test-session-dead'
     $dead.shellStartTicks = '1'
     [IO.File]::WriteAllText((Join-Path $registryDir 'test-session-dead.json'), ($dead | ConvertTo-Json -Depth 4))
+    [IO.File]::WriteAllText((Join-Path $registryDir 'test-session-dead.conv'), 'Codex|conv-dead')
+    [IO.File]::WriteAllText((Join-Path $testDir '.hwnd-test-session-dead'), '1')
+    [IO.File]::WriteAllText((Join-Path $testDir '.popup-test-session-dead.pid'), '1|1')
     Assert (@(Get-AgentSessions).Count -eq 1) 'A record of a dead shell must not be listed.'
     Assert (-not (Test-Path -LiteralPath (Join-Path $registryDir 'test-session-dead.json'))) 'A record of a dead shell must be pruned.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $testDir '.hwnd-test-session-dead'))) 'Pruning must take the window handle file along.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $testDir '.popup-test-session-dead.pid'))) 'Pruning must take the popup pid file along.'
+
+    # --- closed list: a tab closed under its agent can be reopened --------
+    $closed = @(Get-ClosedSessions)
+    Assert ($closed.Count -eq 1 -and $closed[0].conversation -eq 'conv-dead' -and $closed[0].command -eq 'codex') 'A dead record must move to the closed list with its conversation.'
+    $output = (& $cli reopen -DryRun *>&1 | Out-String)
+    $env:AGENTIC_NOTIFY_DIR = $testDir
+    Assert ($output -match 'codex resume conv-dead -c model=x') "reopen must plan an exact resume: $output"
+    Assert (@(Get-ClosedSessions).Count -eq 1) 'reopen -DryRun must keep the closed list.'
+    Remove-Item -LiteralPath $closed[0].path -Force
+    $output = (& $cli reopen *>&1 | Out-String)
+    $env:AGENTIC_NOTIFY_DIR = $testDir
+    Assert ($output -match 'no closed agent tabs') "reopen with an empty closed list must say so: $output"
+
+    # --- sweep: state files of tabs that never had a record --------------
+    [IO.File]::WriteAllText((Join-Path $testDir '.hwnd-test-session-gone'), '1')
+    [IO.File]::WriteAllText((Join-Path $testDir '.tabindex-test-session-gone'), '2')
+    [IO.File]::WriteAllText((Join-Path $testDir '.hwnd-test-session-cli'), '1')
+    [IO.File]::WriteAllText((Join-Path $testDir '.popup-test-session-old.pid'), '1')
+    (Get-Item -LiteralPath (Join-Path $testDir '.popup-test-session-old.pid') -Force).LastWriteTime = (Get-Date).AddDays(-3)
+    [IO.File]::WriteAllText((Join-Path $testDir '.popup-test-session-new.pid'), '1')
+    & $cli __sweep
+    $env:AGENTIC_NOTIFY_DIR = $testDir
+    Assert (-not (Test-Path -LiteralPath (Join-Path $testDir '.hwnd-test-session-gone'))) 'Sweep must drop files of a tab whose window is gone.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $testDir '.tabindex-test-session-gone'))) 'Sweep must drop every file of that tab.'
+    Assert (Test-Path -LiteralPath (Join-Path $testDir '.hwnd-test-session-cli')) 'Sweep must leave registered tabs alone.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $testDir '.popup-test-session-old.pid'))) 'Sweep must drop old leftovers without a window handle.'
+    Assert (Test-Path -LiteralPath (Join-Path $testDir '.popup-test-session-new.pid')) 'Sweep must leave fresh files alone.'
+    Remove-Item -LiteralPath (Join-Path $testDir '.hwnd-test-session-cli') -Force
 
     # --- hook: notify.ps1 writes state and conversation ------------------
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'notify.ps1') -Destination $testDir
@@ -156,7 +189,7 @@ $global:LASTEXITCODE = 0
     $env:AGENTIC_NOTIFY_DIR = $testDir
     Assert ($output -match 'nothing to restore') "restore without a snapshot must say so: $output"
 
-    Write-Host 'PASS: resume arguments, flag passthrough, registration, pruning, hook state, close guard, restore plan.'
+    Write-Host 'PASS: resume arguments, flag passthrough, registration, pruning, closed list, reopen plan, sweep, hook state, close guard, restore plan.'
 } finally {
     $env:WT_SESSION = $savedSession
     $env:AGENTIC_NOTIFY_DIR = $savedNotifyDir

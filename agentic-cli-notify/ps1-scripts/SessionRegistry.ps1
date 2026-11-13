@@ -7,6 +7,7 @@
 #   .sessions\<session>.json   what to relaunch (command, arguments, working dir)
 #   .sessions\<session>.state  "busy" or "idle", written by the hooks
 #   .sessions\<session>.conv   "<Agent>|<conversation id>", written by the hooks
+#   .sessions\closed\<session>.json   tabs closed under a running agent (notify reopen)
 #
 # The hooks write the two side files instead of rewriting the record, so a hook
 # never has to parse JSON or race the launcher over one file.
@@ -98,6 +99,82 @@ function Unregister-AgentSession {
     } catch { }
 }
 
+function Remove-SessionSideFiles {
+    # Everything the hooks and save-hwnd.exe keep for one tab outside the registry.
+    param([string]$SessionId)
+    try {
+        if (-not (Test-SessionKey $SessionId)) { return }
+        $notifyDir = Get-AgenticNotifyDir
+        foreach ($name in @(".hwnd-$SessionId", ".tabindex-$SessionId", ".tabname-$SessionId", ".label-$SessionId",
+                ".popup-$SessionId.pid", ".dismiss-$SessionId", ".cooldown-$SessionId", ".savehwnd-debug-$SessionId")) {
+            Remove-Item -LiteralPath (Join-Path $notifyDir $name) -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+}
+
+function Get-SessionConversation {
+    # Only trust a conversation id the same agent reported: the user may have
+    # quit the registered agent and started another one in the same tab.
+    param($Record)
+    $raw = Read-RegistryValue (Join-Path (Get-SessionRegistryDir) "$($Record.sessionId).conv")
+    if (-not $raw) { return $null }
+    $parts = $raw -split '\|', 2
+    if ($parts.Count -eq 2 -and $parts[0] -eq [string]$Record.agent -and $parts[1] -match '^[A-Za-z0-9_.-]+$') { return $parts[1] }
+    return $null
+}
+
+$script:ClosedSessionLimit = 30
+
+function Save-ClosedSession {
+    <#
+    .SYNOPSIS
+        Remember a tab that went away while its agent was still running.
+    .DESCRIPTION
+        A tab closed with its X button (or lost to a crash or reboot) never runs
+        the launcher's cleanup, so its record is still there when its shell is
+        found dead. `notify reopen` brings such a tab back. An agent the user
+        quit unregisters itself and never gets here.
+    #>
+    param($Record)
+    try {
+        $closedDir = Join-Path (Get-SessionRegistryDir) 'closed'
+        if (-not (Test-Path -LiteralPath $closedDir)) { $null = New-Item -ItemType Directory -Path $closedDir -Force }
+        $closed = [ordered]@{
+            sessionId    = [string]$Record.sessionId
+            agent        = $Record.agent
+            command      = $Record.command
+            args         = @($Record.args)
+            cwd          = $Record.cwd
+            shell        = $Record.shell
+            title        = $Record.title
+            launcher     = $Record.launcher
+            launcherArgs = @($Record.launcherArgs)
+            conversation = Get-SessionConversation $Record
+            startedUtc   = $Record.startedUtc
+            closedUtc    = [DateTime]::UtcNow.ToString('o')
+        }
+        Write-RegistryText (Join-Path $closedDir "$($Record.sessionId).json") ($closed | ConvertTo-Json -Depth 4)
+        Get-ChildItem -LiteralPath $closedDir -Filter '*.json' -File | Sort-Object LastWriteTime -Descending |
+            Select-Object -Skip $script:ClosedSessionLimit | Remove-Item -Force -ErrorAction SilentlyContinue
+    } catch { }
+}
+
+function Get-ClosedSessions {
+    # Newest first. Each entry carries the file it came from in .path.
+    $closedDir = Join-Path (Get-SessionRegistryDir) 'closed'
+    $closed = New-Object System.Collections.Generic.List[object]
+    if (-not (Test-Path -LiteralPath $closedDir)) { return $closed.ToArray() }
+    foreach ($file in (Get-ChildItem -LiteralPath $closedDir -Filter '*.json' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+        try {
+            $entry = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
+            if (-not $entry.command) { continue }
+            $entry | Add-Member -NotePropertyName path -NotePropertyValue $file.FullName -Force
+            $closed.Add($entry)
+        } catch { }
+    }
+    return $closed.ToArray()
+}
+
 function Test-AgentSessionAlive {
     # The start time must match as well: Windows reuses process ids.
     param($Record)
@@ -122,7 +199,7 @@ function Get-AgentSessions {
     <#
     .SYNOPSIS
         Every registered tab whose shell is still running, with the hook-written
-        state merged in. Records of dead shells are deleted on the way.
+        state merged in. Records of dead shells move to the closed list on the way.
     #>
     $dir = Get-SessionRegistryDir
     $notifyDir = Get-AgenticNotifyDir
@@ -132,25 +209,22 @@ function Get-AgentSessions {
     foreach ($file in (Get-ChildItem -LiteralPath $dir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
         $record = $null
         try { $record = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json } catch { }
-        if (-not $record -or -not (Test-SessionKey ([string]$record.sessionId)) -or -not (Test-AgentSessionAlive $record)) {
+        if (-not $record -or -not (Test-SessionKey ([string]$record.sessionId))) {
             Unregister-AgentSession -SessionId $file.BaseName
+            continue
+        }
+        if (-not (Test-AgentSessionAlive $record)) {
+            # The record outlived its shell: the tab was closed under the agent.
+            Save-ClosedSession $record
+            Unregister-AgentSession -SessionId $file.BaseName
+            Remove-SessionSideFiles -SessionId $file.BaseName
             continue
         }
 
         $sessionId = [string]$record.sessionId
         $state = Read-RegistryValue (Join-Path $dir "$sessionId.state")
         if (-not $state) { $state = 'idle' }
-
-        # Only trust a conversation id the same agent reported: the user may have
-        # quit the registered agent and started another one in the same tab.
-        $conversation = $null
-        $rawConversation = Read-RegistryValue (Join-Path $dir "$sessionId.conv")
-        if ($rawConversation) {
-            $parts = $rawConversation -split '\|', 2
-            if ($parts.Count -eq 2 -and $parts[0] -eq [string]$record.agent -and $parts[1] -match '^[A-Za-z0-9_.-]+$') {
-                $conversation = $parts[1]
-            }
-        }
+        $conversation = Get-SessionConversation $record
 
         $hwnd = [long]0
         $null = [long]::TryParse([string](Read-RegistryValue (Join-Path $notifyDir ".hwnd-$sessionId")), [ref]$hwnd)
