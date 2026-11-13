@@ -15,6 +15,11 @@ param(
 # Claude Sonnet 5.5: headless claude -p children inherit the tab's WT_SESSION and would popup/re-capture for the interactive session.
 if ($Agent -eq 'Claude' -and $env:CLAUDE_CODE_SESSION_ATTENDED -eq '0') { exit 0 }
 
+# Cursor Agent also runs the hooks of ~/.claude/settings.json, so in a Cursor tab Claude's
+# hook fires next to Cursor's own and the tab would get a second popup titled "Claude".
+# Cursor sets CURSOR_VERSION for every hook it runs; its own hook passes -Agent Cursor.
+if ($Agent -eq 'Claude' -and $env:CURSOR_VERSION) { exit 0 }
+
 # Use WT_SESSION to isolate state between terminal tabs for either CLI.
 $sessionId = $env:WT_SESSION
 if (-not $sessionId) { $sessionId = "default" }
@@ -272,8 +277,14 @@ try {
                         # non-ASCII glyph leaves the separator behind and the
                         # popup would read "Pi - - PotatoSandwich", so strip
                         # any leading separator as well.
+                        #
+                        # Cursor ends the title with a status badge, "name - <glyph> Ready".
+                        # The popup already says the tab is waiting, so the badge goes:
+                        # a trailing separator, glyph and one word. Where the glyph
+                        # was already dropped, the two spaces it stood between mark it.
+                        $rawName = $rawName -replace '\s[\-:|](?:\s*[^\x20-\x7E]+\s*|\s{2,})\w+\s*$', ''
                         $tabName = ($rawName -replace '[^\x20-\x7E]', '') -replace '^[\s\-:|]+', ''
-                        $tabName = $tabName.Trim()
+                        $tabName = ($tabName -replace '\s{2,}', ' ').Trim()
                         if ($tabName) {
                             $labelFile = "$stateDir\.label-$sessionId"
                             $existingLabel = ""
