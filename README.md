@@ -46,6 +46,35 @@ powershell -ExecutionPolicy Bypass -File .\ps1-scripts\Setup-DevLayoutShortcut.p
 powershell -ExecutionPolicy Bypass -File .\ps1-scripts\Setup-DevLayoutShortcut.ps1 -Preset DevLayout  # launches custom-layouts\DevLayout.json
 ```
 
+## Pi theme
+
+The optional `sydrox-orange-matrix` theme is bundled in
+`themes/pi/sydrox-orange-matrix.json`, separately from the layout composer's
+`ui_theme.py`. Install it from this checkout:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\Install-PiTheme.ps1 -WhatIf
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\Install-PiTheme.ps1
+```
+
+The default destination is `%USERPROFILE%\.pi\agent\themes\`. Use
+`-AgentDir <path>` for a different Pi agent directory. Identical installs are
+no-ops; a differing existing theme requires explicit `-Force` to replace it
+(back up your customizations first). Installation never changes Pi settings or
+other themes. Run `/reload` in an already-open Pi session, then select
+**sydrox-orange-matrix** under `/settings` > **Theme**.
+
+Toolkit Pi overlays already share the global themes directory, so no per-tab
+installation is needed. The installed file is a copy: rerun the installer after
+updating the bundled theme. To uninstall, select another theme and remove only
+`sydrox-orange-matrix.json` from the destination themes directory.
+
+Run the isolated installer regression test (no installed Pi required):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-PiTheme.ps1
+```
+
 ## Session resume
 
 The toolkit gives each window/tab position a deterministic session slot and

@@ -101,6 +101,18 @@ powershell -ExecutionPolicy Bypass -File .\ps1-scripts\LLM_ContextMenu_Toggle.ps
 $env:PI_CODING_AGENT_DIR = "$env:USERPROFILE\.pi\devlayout\w102-t1"; pi --list-models gpt-5.6-luna
 ```
 
+## Bundled Pi theme
+
+- `themes/pi/sydrox-orange-matrix.json` is the canonical bundled Pi theme; it is
+  separate from the composer's `ui_theme.py`.
+- `ps1-scripts/Install-PiTheme.ps1 [-AgentDir <path>] [-WhatIf] [-Force]` copies it
+  into the global Pi agent directory by default. It never edits settings, skips
+  identical files, and requires `-Force` for a differing existing theme.
+- Pi overlays already share the global themes directory. Do not add theme writes
+  to the launcher or install separately into overlay slots.
+- Regression: `powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-PiTheme.ps1`.
+  Manual acceptance: select the theme in ordinary Pi and a toolkit overlay tab.
+
 ## Adding a new agent
 
 1. Add `launchers/launch-<agent>.ps1` with the six positional params; resume per working dir.
