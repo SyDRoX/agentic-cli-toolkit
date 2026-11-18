@@ -1,0 +1,12 @@
+{
+  "ste": {
+    "label": "ASD-STE100",
+    "file": "ste.md",
+    "description": "Controlled plain English, about 80% of ASD-STE100 - short full sentences, zero filler"
+  },
+  "caveman": {
+    "label": "Caveman",
+    "file": "caveman.md",
+    "description": "Compressed fragments - full technical substance, zero filler"
+  }
+}

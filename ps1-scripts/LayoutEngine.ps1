@@ -335,15 +335,16 @@ function Build-LayoutSegments {
         $resolved = Resolve-TabLauncher -Layout $Layout -Tab $tab
         $label = "$($tab.Title) / $($resolved.AgentName) $n"
         if ($i -eq 0) { $lead = "-w new" } else { $lead = "new-tab" }
-        # Model/Effort/ContextWindow are always passed positionally so every launcher's
+        # Model/Effort/ContextWindow/Style are always passed positionally so every launcher's
         # param block lines up; scripts that don't use one just ignore it.
         $model   = if ($tab.Model)         { $tab.Model }         else { "" }
         $effort  = if ($tab.Effort)        { $tab.Effort }        else { "" }
         $ctxWin  = if ($tab.ContextWindow) { $tab.ContextWindow } else { "" }
+        $style   = if ($tab.Style)         { $tab.Style }         else { "" }
         # Values go inside '...' for PowerShell, so a quote is doubled. wt.exe splits
         # its command line on ";" even inside quotes unless written "\;", and a
         # double quote would end the quoted argument, so neither may reach it raw.
-        $launchCommand = "& $(ConvertTo-PsLiteral $resolved.LauncherPath) $n $(ConvertTo-PsLiteral $label) $($Layout.WindowNum) $(ConvertTo-PsLiteral $model) $(ConvertTo-PsLiteral $effort) $(ConvertTo-PsLiteral $ctxWin)"
+        $launchCommand = "& $(ConvertTo-PsLiteral $resolved.LauncherPath) $n $(ConvertTo-PsLiteral $label) $($Layout.WindowNum) $(ConvertTo-PsLiteral $model) $(ConvertTo-PsLiteral $effort) $(ConvertTo-PsLiteral $ctxWin) $(ConvertTo-PsLiteral $style)"
         $segments += "$lead --title `"$(ConvertTo-WtText $tab.Title)`" -d `"$(ConvertTo-WtText $dir)`" `"$PwshExe`" -NoExit -ExecutionPolicy Bypass -Command `"$(ConvertTo-WtText $launchCommand)`""
     }
     return $segments

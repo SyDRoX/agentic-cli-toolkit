@@ -39,7 +39,8 @@ param(
     [Parameter(Position = 2)][string]$WindowNum,
     [Parameter(Position = 3)][string]$Model,
     [Parameter(Position = 4)][string]$Effort,
-    [Parameter(Position = 5)][string]$ContextWindow
+    [Parameter(Position = 5)][string]$ContextWindow,
+    [Parameter(Position = 6)][string]$Style
 )
 
 $DefaultModel = "gpt-5.6-luna"
@@ -260,10 +261,23 @@ if ($window -and $info.ContextWindow -and [int]$info.ContextWindow -eq [int]$win
 $piArgs = @("--continue", "--model", $modelPattern)
 if ($Effort) { $piArgs += @("--thinking", $Effort) }
 
+# The style extension is loaded by path on every tab, so /style works even on a tab
+# launched without a style, and nothing is written into the pi config directory.
+. (Join-Path $PSScriptRoot "..\ps1-scripts\ResponseStyle.ps1")
+$resolvedStyle = Resolve-ResponseStyle -Name $Style
+$stylesDir = Join-Path (Split-Path -Parent $PSScriptRoot) "styles"
+$styleExtension = Join-Path $stylesDir "pi-extension\agentic-cli-style.ts"
+if (Test-Path -LiteralPath $styleExtension) {
+    $piArgs += @("--extension", $styleExtension)
+    $env:AGENTIC_STYLES_DIR = $stylesDir
+    $env:AGENTIC_STYLE = if ($resolvedStyle) { $resolvedStyle.Key } else { "" }
+}
+
 $ctxNote = if ($window) { "context $window" } else { "context default" }
 Write-Host "[DevLayout] $Label" -ForegroundColor Cyan
 Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 Write-Host "[DevLayout] model: $modelPattern (thinking ${Effort}, $ctxNote)" -ForegroundColor DarkGray
+if ($resolvedStyle) { Write-Host "[DevLayout] style: $($resolvedStyle.Label)" -ForegroundColor DarkGray }
 
 if ($window) {
     if (-not $info.Provider) {
@@ -289,7 +303,7 @@ $sessionRegistry = Join-Path $env:USERPROFILE ".claude\hooks\agentic-cli-notify\
 if (Test-Path $sessionRegistry) {
     . $sessionRegistry
     $registeredSession = Register-AgentSession -Agent Pi -Command pi -Title ($Label -replace ' / [^/]*$', '') `
-        -Launcher $PSCommandPath -LauncherArguments @($TabIndex, $Label, $WindowNum, $Model, $Effort, $ContextWindow)
+        -Launcher $PSCommandPath -LauncherArguments @($TabIndex, $Label, $WindowNum, $Model, $Effort, $ContextWindow, $Style)
 }
 
 try {

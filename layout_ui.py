@@ -127,6 +127,20 @@ DEFAULT_CONTEXT_BY_AGENT = {"claude": "default[1m]", "codex": "0.25m", "pi": "de
 CONTEXT_WINDOWS = CLAUDE_CONTEXT_WINDOWS
 
 
+def load_response_styles() -> list[str]:
+    """Style keys from styles/styles.json beside the script/exe; blank means no style."""
+    try:
+        catalog = json.loads((ROOT / "styles" / "styles.json").read_text(encoding="utf-8-sig"))
+        return [""] + [str(key).lower() for key in catalog]
+    except (OSError, ValueError, AttributeError):
+        return [""]
+
+
+RESPONSE_STYLES = load_response_styles()
+# Cursor Agent has no prompt hook, so its tabs cannot carry a style.
+STYLE_AGENTS = ("claude", "codex", "pi")
+
+
 def load_repos() -> list[dict[str, str]]:
     """Load the editable repo catalog, falling back to the original defaults."""
     if not REPOS_FILE.exists():
@@ -225,7 +239,7 @@ def normalize_preset(data: any) -> list[dict]:
             if not title or not working_dir:
                 raise ValueError(f"Window {i}, tab {j} needs a title and a workingDir.")
             norm = dict(tab, title=title, workingDir=working_dir, agent=agent)
-            for key in ("model", "effort", "contextWindow"):
+            for key in ("model", "effort", "contextWindow", "style"):
                 if key in norm:
                     norm[key] = "" if norm[key] is None else str(norm[key])
             norm_tabs.append(norm)
@@ -650,19 +664,21 @@ class LayoutUI(ctk.CTk):
         tabs_outer, tabs_frame = self._section(right, "Tabs")
         tabs_outer.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
-        cols = ("title", "agent", "model", "effort", "context", "path")
+        cols = ("title", "agent", "model", "effort", "context", "style", "path")
         self.tabs_tree = ttk.Treeview(tabs_frame, columns=cols, show="headings", height=5)
         self.tabs_tree.heading("title", text="Title", anchor="w")
         self.tabs_tree.heading("agent", text="Agent", anchor="w")
         self.tabs_tree.heading("model", text="Model", anchor="w")
         self.tabs_tree.heading("effort", text="Effort", anchor="w")
         self.tabs_tree.heading("context", text="Context window", anchor="w")
+        self.tabs_tree.heading("style", text="Style", anchor="w")
         self.tabs_tree.heading("path", text="Working directory", anchor="w")
         self.tabs_tree.column("title", width=90, stretch=False)
         self.tabs_tree.column("agent", width=90, stretch=False)
         self.tabs_tree.column("model", width=110, stretch=False)
         self.tabs_tree.column("effort", width=70, stretch=False)
         self.tabs_tree.column("context", width=130, stretch=False)
+        self.tabs_tree.column("style", width=80, stretch=False)
         self.tabs_tree.column("path", width=280)
         self.tabs_tree.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
         self.tabs_tree.bind("<Double-1>", self._begin_cell_edit)
@@ -1222,6 +1238,7 @@ class LayoutUI(ctk.CTk):
                     tab.get("model", ""),
                     tab.get("effort", ""),
                     tab.get("contextWindow", ""),
+                    tab.get("style", ""),
                     tab["workingDir"],
                 ),
             )
@@ -1358,6 +1375,12 @@ class LayoutUI(ctk.CTk):
             var = tk.StringVar(value=tab.get("contextWindow", ""))
             widget = self._option(tree, var, values, width=w, command=commit)
             widget.bind("<FocusOut>", lambda _e: self._end_cell_edit())
+        elif col_name == "style":
+            if agent_key not in STYLE_AGENTS:
+                return
+            var = tk.StringVar(value=tab.get("style", ""))
+            widget = self._option(tree, var, RESPONSE_STYLES, width=w, command=commit)
+            widget.bind("<FocusOut>", lambda _e: self._end_cell_edit())
         else:
             return
 
@@ -1385,6 +1408,14 @@ class LayoutUI(ctk.CTk):
                 tab["model"] = DEFAULT_MODEL_BY_AGENT.get(value, "")
                 tab["effort"] = "" if value == "cursor" else DEFAULT_EFFORT
                 tab["contextWindow"] = DEFAULT_CONTEXT_BY_AGENT.get(value, "")
+                if value not in STYLE_AGENTS:
+                    tab.pop("style", None)
+        elif col_name == "style":
+            # An absent key keeps presets that never used a style byte-identical on save.
+            if value:
+                tab["style"] = value
+            else:
+                tab.pop("style", None)
         elif col_name == "context":
             tab["contextWindow"] = value
         elif col_name == "path":
