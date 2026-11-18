@@ -67,7 +67,8 @@ function Resolve-ResponseStyle {
     }
 
     $resolved = $entry.Clone()
-    $resolved.Text = (Get-Content -LiteralPath $entry.RulesPath -Raw -Encoding UTF8).Trim()
+    # LF only: a CRLF checkout must yield the same bytes for every agent and for the installer.
+    $resolved.Text = (Get-Content -LiteralPath $entry.RulesPath -Raw -Encoding UTF8).Replace("`r`n", "`n").Trim()
     return $resolved
 }
 

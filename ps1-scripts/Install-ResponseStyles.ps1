@@ -50,9 +50,9 @@ foreach ($key in $catalog.Keys) {
         }
     }
 }
-$files += @{ Destination = (Join-Path $skillDir "styles.json"); Content = (($skillCatalog | ConvertTo-Json -Depth 5) + "`n") }
+$files += @{ Destination = (Join-Path $skillDir "styles.json"); Content = (($skillCatalog | ConvertTo-Json -Depth 5).Replace("`r`n", "`n") + "`n") }
 foreach ($name in @("SKILL.md", "Switch-ResponseStyle.ps1")) {
-    $files += @{ Destination = (Join-Path $skillDir $name); Content = [System.IO.File]::ReadAllText((Join-Path $skillSource $name)) }
+    $files += @{ Destination = (Join-Path $skillDir $name); Content = [System.IO.File]::ReadAllText((Join-Path $skillSource $name)).Replace("`r`n", "`n") }
 }
 
 $pending = @()
