@@ -367,13 +367,22 @@ function New-RadioMarkerIcon {
     }
 }
 
-# Run notification setup inside the new tab so it inherits that tab's WT_SESSION.
-$setupSnippet = @'
+# Launch through the `notify` command inside the new tab, so the tab inherits its
+# own WT_SESSION, gets its notification setup, and is covered by `notify close` /
+# `notify restore`. {0} is the configured command, e.g. "claude --flag". Installs
+# that predate the notify command fall back to the bare per-tab setup.
+$launchTemplate = @'
+$notifyCommand = Join-Path $env:USERPROFILE '.claude\hooks\agentic-cli-notify\bin\notify.ps1'
 $notifySetup = Join-Path $env:USERPROFILE '.claude\hooks\agentic-cli-notify\setup.ps1'
-if (Test-Path -LiteralPath $notifySetup) {
-    & $notifySetup
+if (Test-Path -LiteralPath $notifyCommand) {
+    & $notifyCommand {0}
 } else {
-    Write-Warning 'Notification setup skipped: install agentic-cli-notify first.'
+    if (Test-Path -LiteralPath $notifySetup) {
+        & $notifySetup
+    } else {
+        Write-Warning 'Notification setup skipped: install agentic-cli-notify first.'
+    }
+    {0}
 }
 '@
 
@@ -387,7 +396,8 @@ function Start-LLMTerminal {
         [string]$RunAs
     )
 
-    $script = $setupSnippet + [Environment]::NewLine + $LaunchCommand
+    # Replace, not -f: the template is PowerShell and full of braces.
+    $script = $launchTemplate.Replace('{0}', $LaunchCommand)
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
     $windowArguments = if ($TerminalMode -eq "Append") { "-w 0" } else { "-w -1" }
     # wt.exe splits its command line on ";" even inside quotes unless written "\;".

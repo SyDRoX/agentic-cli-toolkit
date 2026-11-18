@@ -114,43 +114,189 @@ class SaveHwnd
         try { Run(args); } catch { }
     }
 
-    static void Run(string[] args)
+    [DllImport("kernel32.dll")]
+    static extern bool FreeConsole();
+
+    [DllImport("kernel32.dll")]
+    static extern bool AttachConsole(uint processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    static extern bool SetConsoleTitle(string title);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetConsoleTitle(StringBuilder title, int size);
+
+    static string StateDir()
     {
-        string suffix = Suffix(args);
-        string dir = Path.Combine(
+        // Tests point the whole notifier at a scratch directory.
+        string overridden = Environment.GetEnvironmentVariable("AGENTIC_NOTIFY_DIR");
+        if (!string.IsNullOrEmpty(overridden)) return overridden;
+        return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".claude", "hooks", "agentic-cli-notify"
         );
-        Directory.CreateDirectory(dir);
+    }
 
-        // Try process tree first (reliable for automated launches like DevLayout)
-        IntPtr hwnd = FindWtWindowByProcessTree();
-
-        // Fall back to foreground window (works for manual setup in focused tab)
-        if (hwnd == IntPtr.Zero)
+    static List<IntPtr> TerminalWindows()
+    {
+        var windows = new List<IntPtr>();
+        EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
         {
-            hwnd = GetForegroundWindow();
-            if (hwnd == IntPtr.Zero) return;
+            if (IsWindowVisible(hWnd) && GetWindowTextLength(hWnd) > 0 && IsWindowsTerminal(hWnd)) windows.Add(hWnd);
+            return true;
+        }, IntPtr.Zero);
+        return windows;
+    }
 
-            // Verify it's a WindowsTerminal window
+    class Probe
+    {
+        public string Session;
+        public uint ProcessId;
+        public string Marker;
+        public string OldTitle;
+        public bool Found;
+    }
+
+    // save-hwnd.exe --locate <session>:<pid> [<session>:<pid> ...]
+    //
+    // Finds where each tab is right now, whichever tab is selected and whichever
+    // window it was dragged to. Windows Terminal exposes no tab identity, so the
+    // tab is made to identify itself: a process attached to its console gets a
+    // marker as console title, the marker shows up as the tab's name, and the
+    // old title is put back. <pid> is any process running in the tab.
+    //
+    // Nothing is written for a tab whose marker never shows (a tab the user
+    // renamed, or suppressApplicationTitle): the files of the last capture stay.
+    static void Locate(string[] args)
+    {
+        string dir = StateDir();
+        var probes = new List<Probe>();
+        for (int i = 1; i < args.Length; i++)
+        {
+            string[] parts = args[i].Split(':');
             uint pid;
-            GetWindowThreadProcessId(hwnd, out pid);
-            try
-            {
-                var proc = Process.GetProcessById((int)pid);
-                if (proc.ProcessName != "WindowsTerminal") return;
-            }
-            catch { return; }
+            if (parts.Length != 2 || !uint.TryParse(parts[1], out pid)) continue;
+            string session = Regex.Replace(parts[0], @"[^A-Za-z0-9_-]", "");
+            if (session.Length == 0) continue;
+            probes.Add(new Probe { Session = session, ProcessId = pid });
+        }
+        if (probes.Count == 0) return;
+
+        FreeConsole();
+        var active = new List<Probe>();
+        foreach (Probe probe in probes)
+        {
+            if (!AttachConsole(probe.ProcessId)) continue;
+            var title = new StringBuilder(2048);
+            GetConsoleTitle(title, title.Capacity);
+            probe.OldTitle = title.ToString();
+            probe.Marker = "ntfy-" + Guid.NewGuid().ToString("N").Substring(0, 12);
+            SetConsoleTitle(probe.Marker);
+            FreeConsole();
+            active.Add(probe);
         }
 
-        // Save HWND
-        File.WriteAllText(Path.Combine(dir, ".hwnd" + suffix), hwnd.ToInt64().ToString());
-
-        // Find and save the currently selected tab's index (1-based)
         try
         {
-            File.WriteAllText(Path.Combine(dir, ".savehwnd-debug" + suffix), "starting tab enum");
+            var condition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
+            var watch = Stopwatch.StartNew();
+            int missing = active.Count;
+            while (missing > 0 && watch.ElapsedMilliseconds < 2000)
+            {
+                foreach (IntPtr window in TerminalWindows())
+                {
+                    try
+                    {
+                        var tabs = AutomationElement.FromHandle(window).FindAll(TreeScope.Descendants, condition);
+                        for (int index = 0; index < tabs.Count; index++)
+                        {
+                            string name = tabs[index].Current.Name ?? "";
+                            foreach (Probe probe in active)
+                            {
+                                if (probe.Found || name.IndexOf(probe.Marker, StringComparison.Ordinal) < 0) continue;
+                                probe.Found = true;
+                                missing--;
+                                File.WriteAllText(Path.Combine(dir, ".hwnd-" + probe.Session), window.ToInt64().ToString());
+                                File.WriteAllText(Path.Combine(dir, ".tabindex-" + probe.Session), (index + 1).ToString());
+                                File.WriteAllText(Path.Combine(dir, ".tabname-" + probe.Session),
+                                    Regex.Replace(probe.OldTitle, @"[^\x20-\x7E]", "").Trim());
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                if (missing > 0) System.Threading.Thread.Sleep(40);
+            }
+        }
+        finally
+        {
+            foreach (Probe probe in active)
+            {
+                if (!AttachConsole(probe.ProcessId)) continue;
+                // The agent may have set a title of its own in the meantime: keep that one.
+                var title = new StringBuilder(2048);
+                GetConsoleTitle(title, title.Capacity);
+                if (title.ToString().IndexOf(probe.Marker, StringComparison.Ordinal) >= 0) SetConsoleTitle(probe.OldTitle);
+                FreeConsole();
+            }
+        }
+    }
 
+    static void Run(string[] args)
+    {
+        if (args != null && args.Length > 1 && args[0] == "--locate")
+        {
+            Locate(args);
+            return;
+        }
+
+        string suffix = Suffix(args);
+        string dir = StateDir();
+        Directory.CreateDirectory(dir);
+
+        // Read the foreground window before the slow parent-process walk: the user may
+        // switch to another WT window a second after submitting a prompt.
+        IntPtr hwnd = GetForegroundWindow();
+        if (!IsWindowsTerminal(hwnd)) hwnd = IntPtr.Zero;
+
+        int tabIndex = 0;
+        string tabName = "";
+        if (hwnd != IntPtr.Zero) ReadSelectedTab(hwnd, dir, suffix, out tabIndex, out tabName);
+
+        // Fallback for automated launches (DevLayout) where WT is not yet in front.
+        if (hwnd == IntPtr.Zero)
+        {
+            hwnd = FindWtWindowByProcessTree();
+            if (hwnd == IntPtr.Zero) return;
+            ReadSelectedTab(hwnd, dir, suffix, out tabIndex, out tabName);
+        }
+
+        File.WriteAllText(Path.Combine(dir, ".hwnd" + suffix), hwnd.ToInt64().ToString());
+        if (tabIndex > 0)
+        {
+            File.WriteAllText(Path.Combine(dir, ".tabindex" + suffix), tabIndex.ToString());
+            File.WriteAllText(Path.Combine(dir, ".tabname" + suffix), tabName);
+        }
+    }
+
+    static bool IsWindowsTerminal(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+        uint pid;
+        GetWindowThreadProcessId(hwnd, out pid);
+        try
+        {
+            return Process.GetProcessById((int)pid).ProcessName == "WindowsTerminal";
+        }
+        catch { return false; }
+    }
+
+    static void ReadSelectedTab(IntPtr hwnd, string dir, string suffix, out int tabIndex, out string tabName)
+    {
+        tabIndex = 0;
+        tabName = "";
+        try
+        {
             var root = AutomationElement.FromHandle(hwnd);
             var tabs = root.FindAll(TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem));
@@ -164,12 +310,9 @@ class SaveHwnd
                     var sel = (SelectionItemPattern)tab.GetCurrentPattern(SelectionItemPattern.Pattern);
                     if (sel.Current.IsSelected)
                     {
-                        File.WriteAllText(Path.Combine(dir, ".tabindex" + suffix), idx.ToString());
-                        // Also save name for display
-                        string name = tab.Current.Name ?? "";
-                        string clean = Regex.Replace(name, @"[^\x20-\x7E]", "").Trim();
-                        File.WriteAllText(Path.Combine(dir, ".tabname" + suffix), clean);
-                        break;
+                        tabIndex = idx;
+                        tabName = Regex.Replace(tab.Current.Name ?? "", @"[^\x20-\x7E]", "").Trim();
+                        return;
                     }
                 }
                 catch { }

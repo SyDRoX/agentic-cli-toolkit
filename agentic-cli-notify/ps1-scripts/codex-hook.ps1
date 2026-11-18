@@ -12,7 +12,11 @@ try {
             'UserPromptSubmit' { 'resume' }
         }
         if ($action) {
-            & (Join-Path $PSScriptRoot 'notify.ps1') -Action $action -Agent Codex *> $null
+            # The session id lets `notify restore` reopen this exact conversation.
+            # Validated here: it ends up in a file name pattern and a command line.
+            $notifyArguments = @{ Action = $action; Agent = 'Codex' }
+            if ([string]$event.session_id -match '^[A-Za-z0-9-]+$') { $notifyArguments.ConversationId = [string]$event.session_id }
+            & (Join-Path $PSScriptRoot 'notify.ps1') @notifyArguments *> $null
         }
     }
 } catch {

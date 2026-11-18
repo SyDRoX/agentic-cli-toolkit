@@ -1,3 +1,6 @@
+# Local workflow handoff
+.pi/workflow-state.json
+
 # Python runtime files
 __pycache__/
 *.py[cod]

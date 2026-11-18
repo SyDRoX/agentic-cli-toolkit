@@ -29,6 +29,7 @@ $files = @(
     (Join-Path $ps1Dir 'popup.ps1'),
     (Join-Path $ps1Dir 'codex-hook.ps1'),
     (Join-Path $ps1Dir 'cursor-hook.ps1'),
+    (Join-Path $ps1Dir 'SessionRegistry.ps1'),
     (Join-Path $repoDir 'attention.cmd'),
     (Join-Path $repoDir 'resume.cmd'),
     (Join-Path $repoDir 'setup.ps1'),
@@ -37,6 +38,30 @@ $files = @(
 foreach ($file in $files) {
     Copy-Item -LiteralPath $file -Destination $InstallDir -Force
 }
+
+# ---------------------------------------------------------------------------
+# `notify` command
+# ---------------------------------------------------------------------------
+# Its own folder: the install directory already holds notify.ps1, the hook
+# dispatcher, and only the command belongs on PATH.
+$binDir = Join-Path $InstallDir 'bin'
+$null = New-Item -ItemType Directory -Path $binDir -Force
+Copy-Item -LiteralPath (Join-Path $ps1Dir 'notify-cli.ps1') -Destination (Join-Path $binDir 'notify.ps1') -Force
+
+# Read and write the raw registry value: [Environment]::GetEnvironmentVariable
+# expands %VARIABLES%, and writing that back would freeze them into the PATH.
+$environmentKey = Get-Item -LiteralPath 'HKCU:\Environment'
+$userPath = [string]$environmentKey.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+$pathEntries = @($userPath.Split(';') | Where-Object { $_ })
+if ($pathEntries -notcontains $binDir) {
+    Set-ItemProperty -LiteralPath 'HKCU:\Environment' -Name 'Path' -Type ExpandString -Value (($pathEntries + $binDir) -join ';')
+    # A registry write alone tells nobody. Setting any user variable broadcasts
+    # the change, so terminals opened from now on see the new PATH.
+    [Environment]::SetEnvironmentVariable('AGENTIC_NOTIFY_PATH_REFRESH', '1', 'User')
+    [Environment]::SetEnvironmentVariable('AGENTIC_NOTIFY_PATH_REFRESH', $null, 'User')
+    Write-Host "Added $binDir to your user PATH. Open a new terminal tab to use the notify command."
+}
+if (@($env:Path.Split(';')) -notcontains $binDir) { $env:Path = "$env:Path;$binDir" }
 
 # ---------------------------------------------------------------------------
 # Compile save-hwnd.exe
@@ -108,7 +133,26 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
 } else {
     Write-Host ''
     Write-Host "Settings file exists at $settingsFile"
+
+    # The project used to install as "claude-notify". Hooks still pointing there
+    # run the old copy. Edited as text: a JSON round-trip through PowerShell 5.1
+    # would reformat the whole file.
+    $settingsText = [IO.File]::ReadAllText($settingsFile)
+    $legacyPattern = '(?<=[\\/]hooks[\\/]+)claude-notify(?=[\\/]+(attention|resume)\.cmd)'
+    if ($settingsText -match $legacyPattern) {
+        if ($settingsText -match '[\\/]agentic-cli-notify[\\/]+(attention|resume)\.cmd') {
+            Write-Warning 'settings.json registers both the old claude-notify hooks and the current ones. Delete the claude-notify entries, or every popup shows twice.'
+        } else {
+            $backup = "$settingsFile.bak-agentic-cli-notify-$([guid]::NewGuid().ToString('N'))"
+            Copy-Item -LiteralPath $settingsFile -Destination $backup
+            [IO.File]::WriteAllText($settingsFile, [regex]::Replace($settingsText, $legacyPattern, 'agentic-cli-notify'), (New-Object Text.UTF8Encoding($false)))
+            Write-Host "Repointed the old claude-notify hooks to this install. Backup: $backup"
+        }
+    }
 }
+
+# Drop state files of tabs that no longer exist.
+try { & (Join-Path $binDir 'notify.ps1') __sweep } catch { }
 Write-Host ''
 Write-Host 'Ensure settings.json has the following hooks registered:'
 Write-Host ''
@@ -127,6 +171,11 @@ Write-Host "  3. Run: powershell -NoProfile -ExecutionPolicy Bypass -File `"$Ins
 Write-Host '  4. Repeat for every Claude Code tab'
 Write-Host ''
 Write-Host 'Re-run setup.ps1 after: WT restart, tab reorder, adding/removing tabs.'
+Write-Host ''
+Write-Host 'Or start the agent through the notify command, which does the setup for you'
+Write-Host 'and follows the tab when it is reordered or dragged to another window:'
+Write-Host '  notify claude --dangerously-skip-permissions'
+Write-Host '  notify list | notify close | notify restore | notify reopen'
 Write-Host ''
 Write-Host 'Other agents:'
 Write-Host '  Codex  - run /hooks in Codex to trust the two notification hooks'

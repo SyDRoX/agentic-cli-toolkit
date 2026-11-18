@@ -104,17 +104,32 @@ Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 # dead tab. The SessionStart hook records the new id, so the next launch resumes
 # that instead. Only a quick failure counts as a rejection: a session that ran
 # for a while and then exited non-zero must not be replaced by an empty one.
-$startedAt = Get-Date
-if ($slot.ResumeId) {
-    Write-Host "[DevLayout] resuming $($slot.ResumeId) via $($slot.Source)" -ForegroundColor DarkGray
-    & claude --dangerously-skip-permissions --resume $slot.ResumeId @extraArgs
-} else {
-    Write-Host "[DevLayout] new session, pinned to $($slot.DefaultSessionId)" -ForegroundColor DarkGray
-    & claude --dangerously-skip-permissions --session-id $slot.DefaultSessionId @extraArgs
+# Optional agentic-cli-notify registry, so `notify close` / `notify restore`
+# cover this tab. Restore reruns this launcher, so the slot rules above still
+# pick the conversation.
+$registeredSession = $null
+$sessionRegistry = Join-Path $env:USERPROFILE ".claude\hooks\agentic-cli-notify\SessionRegistry.ps1"
+if (Test-Path $sessionRegistry) {
+    . $sessionRegistry
+    $registeredSession = Register-AgentSession -Agent Claude -Command claude -Title ("$label" -replace ' / [^/]*$', '') `
+        -Launcher $PSCommandPath -LauncherArguments @("$tabIndex", "$label", "$windowNum", "$model", "$effort", "$contextWindow")
 }
-if ($LASTEXITCODE -ne 0 -and ((Get-Date) - $startedAt).TotalSeconds -lt 15) {
-    Write-Warning "[DevLayout] Claude rejected the session (exit $LASTEXITCODE). Starting a fresh session; it will be remembered for next launch."
-    & claude --dangerously-skip-permissions @extraArgs
+
+$startedAt = Get-Date
+try {
+    if ($slot.ResumeId) {
+        Write-Host "[DevLayout] resuming $($slot.ResumeId) via $($slot.Source)" -ForegroundColor DarkGray
+        & claude --dangerously-skip-permissions --resume $slot.ResumeId @extraArgs
+    } else {
+        Write-Host "[DevLayout] new session, pinned to $($slot.DefaultSessionId)" -ForegroundColor DarkGray
+        & claude --dangerously-skip-permissions --session-id $slot.DefaultSessionId @extraArgs
+    }
+    if ($LASTEXITCODE -ne 0 -and ((Get-Date) - $startedAt).TotalSeconds -lt 15) {
+        Write-Warning "[DevLayout] Claude rejected the session (exit $LASTEXITCODE). Starting a fresh session; it will be remembered for next launch."
+        & claude --dangerously-skip-permissions @extraArgs
+    }
+} finally {
+    if ($registeredSession) { Unregister-AgentSession -SessionId $registeredSession }
 }
 
 # The shell stays open (-NoExit). Do not let a later manual `claude` in it

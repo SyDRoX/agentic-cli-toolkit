@@ -39,6 +39,21 @@ public class WinSwitch {
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
 
+    [DllImport("user32.dll")]
+    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    public const int GWL_EXSTYLE = -20;
+    public const int WS_EX_TOOLWINDOW = 0x00000080;
+    public const int WS_EX_NOACTIVATE = 0x08000000;
+
+    public static void MakeNoActivate(IntPtr hwnd) {
+        int style = GetWindowLong(hwnd, GWL_EXSTYLE);
+        SetWindowLong(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
+    }
+
     public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
     public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
     public const uint SWP_NOMOVE = 0x0002;
@@ -107,6 +122,30 @@ $label = ""
 if (Test-Path $labelFile) {
     $label = (Get-Content $labelFile -Raw -ErrorAction SilentlyContinue)
     if ($label) { $label = $label.Trim() }
+}
+
+# The shell of a registered tab (see SessionRegistry.ps1). A popup for a tab the
+# user closed has nothing left to focus, so it goes away with the tab. Tabs
+# without a registry record are not tracked and count as alive.
+$tabShellPid = 0
+$tabShellTicks = ''
+try {
+    $recordFile = "$stateDir\.sessions\$SessionId.json"
+    if (Test-Path $recordFile) {
+        $record = Get-Content $recordFile -Raw | ConvertFrom-Json
+        $tabShellPid = [int]$record.shellPid
+        $tabShellTicks = [string]$record.shellStartTicks
+    }
+} catch { $tabShellPid = 0 }
+
+function Test-TabShellAlive {
+    if ($tabShellPid -le 0) { return $true }
+    try {
+        $shell = Get-Process -Id $tabShellPid -ErrorAction SilentlyContinue
+        if (-not $shell) { return $false }
+        # Windows reuses process ids: the start time must match too.
+        return ($shell.StartTime.ToUniversalTime().Ticks.ToString() -eq $tabShellTicks)
+    } catch { return $true }
 }
 
 $popupGap = 8
@@ -201,6 +240,7 @@ $window.WindowStyle = "None"
 $window.AllowsTransparency = $true
 $window.Background = [System.Windows.Media.Brushes]::Transparent
 $window.Topmost = $true
+$window.ShowActivated = $false
 $window.ShowInTaskbar = $false
 $window.SizeToContent = "Height"
 $window.Width = 350
@@ -221,21 +261,42 @@ $border.Cursor = [System.Windows.Input.Cursors]::Hand
 
 $stack = New-Object System.Windows.Controls.StackPanel
 
+$windowName = ""
+$tabName = $label
+if ($label -match '^(.+?) / (.+)$') {
+    $windowName = $Matches[1]
+    $tabName = $Matches[2]
+}
+
+# Header row: agent left, window name right
+$headerRow = New-Object System.Windows.Controls.DockPanel
+
+$windowBlock = New-Object System.Windows.Controls.TextBlock
+$windowBlock.Text = $windowName
+$windowBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#cccccc")
+$windowBlock.FontSize = 13
+$windowBlock.VerticalAlignment = "Center"
+$windowBlock.Margin = [System.Windows.Thickness]::new(8, 0, 0, 0)
+[System.Windows.Controls.DockPanel]::SetDock($windowBlock, "Right")
+
 $titleBlock = New-Object System.Windows.Controls.TextBlock
-$titleBlock.Text = if ($label) { "$Agent - $label" } else { $Agent }
+$titleBlock.Text = $Agent
 $titleBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#f0883e")
 $titleBlock.FontSize = 16
 $titleBlock.FontWeight = "Bold"
-$titleBlock.TextTrimming = "CharacterEllipsis"
-$titleBlock.Margin = [System.Windows.Thickness]::new(0, 0, 0, 4)
 
-$body = New-Object System.Windows.Controls.TextBlock
-$body.Text = "Waiting for your input"
-$body.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#eaeaea")
-$body.FontSize = 14
-$body.TextWrapping = "Wrap"
+$null = $headerRow.Children.Add($windowBlock)
+$null = $headerRow.Children.Add($titleBlock)
 
-# Bottom row: hint left, dismiss right
+$tabBlock = New-Object System.Windows.Controls.TextBlock
+$tabBlock.Text = $tabName
+$tabBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#eaeaea")
+$tabBlock.FontSize = 14
+$tabBlock.FontWeight = "SemiBold"
+$tabBlock.TextTrimming = "CharacterEllipsis"
+$tabBlock.Margin = [System.Windows.Thickness]::new(0, 4, 0, 2)
+
+# Bottom row: status and hint left, dismiss right
 $bottomRow = New-Object System.Windows.Controls.DockPanel
 $bottomRow.Margin = [System.Windows.Thickness]::new(0, 4, 0, 0)
 
@@ -260,15 +321,22 @@ $closeBtn.Add_MouseLeftButtonDown({
 })
 
 $hint = New-Object System.Windows.Controls.TextBlock
-$hint.Text = "Focus this tab"
-$hint.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#888888")
 $hint.FontSize = 12
+$hint.VerticalAlignment = "Center"
+$statusRun = New-Object System.Windows.Documents.Run "Waiting for your input"
+$statusRun.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#aaaaaa")
+$statusRun.FontSize = 13
+# PowerShell 5.1 reads BOM-less scripts as ANSI, so build the dot from its code point.
+$hintRun = New-Object System.Windows.Documents.Run "  $([char]0x00B7)  Focus this tab"
+$hintRun.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#888888")
+$hint.Inlines.Add($statusRun)
+$hint.Inlines.Add($hintRun)
 
 $null = $bottomRow.Children.Add($closeBtn)
 $null = $bottomRow.Children.Add($hint)
 
-$null = $stack.Children.Add($titleBlock)
-$null = $stack.Children.Add($body)
+$null = $stack.Children.Add($headerRow)
+if ($tabName) { $null = $stack.Children.Add($tabBlock) }
 $null = $stack.Children.Add($bottomRow)
 $border.Child = $stack
 $window.Content = $border
@@ -306,6 +374,9 @@ $dismissTimer.Interval = [TimeSpan]::FromMilliseconds(500)
 $dismissTimer.Add_Tick({
     if (Test-Path $dismissFile) {
         Write-PopupLog "DISMISS_SIGNAL detected, closing"
+        $window.Close()
+    } elseif (-not (Test-TabShellAlive)) {
+        Write-PopupLog "TAB_GONE, closing"
         $window.Close()
     }
 })
@@ -346,10 +417,19 @@ $reflowTimer.Add_Tick({
 })
 $reflowTimer.Start()
 
+# ShowActivated alone still lets a click on the popup steal focus from the user's app.
+$window.Add_SourceInitialized({
+    try {
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $window).Handle
+        [WinSwitch]::MakeNoActivate($hwnd)
+    } catch {}
+})
+
 # Give up the slot as soon as this popup goes away.
 $window.Add_Closed({
     try { $reflowTimer.Stop() } catch {}
     Remove-Item $claimFile -Force -ErrorAction SilentlyContinue
+    $window.Dispatcher.InvokeShutdown()
 })
 
 # notify.ps1 records this popup's pid when it starts it, and clears any stale
@@ -359,7 +439,9 @@ $window.Add_Closed({
 Write-PopupLog "STARTED"
 
 try {
-    $null = $window.ShowDialog()
+    # ShowDialog activates the window regardless of ShowActivated.
+    $window.Show()
+    [System.Windows.Threading.Dispatcher]::Run()
 } catch {
     $_ | Out-File "$stateDir\popup-crash.log"
 }

@@ -60,10 +60,13 @@ try {
                     [System.Windows.Automation.PropertyCondition]::new(
                         [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $popupId))
                 foreach ($window in $windows) {
-                    $title = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                    $agentText = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
                         [System.Windows.Automation.PropertyCondition]::new(
-                            [System.Windows.Automation.AutomationElement]::NameProperty, 'Codex - notification integration test'))
-                    if ($title) { $foundTitle = $true }
+                            [System.Windows.Automation.AutomationElement]::NameProperty, 'Codex'))
+                    $tabText = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                        [System.Windows.Automation.PropertyCondition]::new(
+                            [System.Windows.Automation.AutomationElement]::NameProperty, 'notification integration test'))
+                    if ($agentText -and $tabText) { $foundTitle = $true }
                 }
             } while (-not $foundTitle -and [DateTime]::UtcNow -lt $deadline)
             if (-not $foundTitle) { throw "Codex popup title not found for process $popupId." }

@@ -3,8 +3,22 @@ param(
     [Parameter(Position=0)]
     [string]$Action = "attention",
     [ValidateSet('Claude', 'Codex', 'Pi', 'Cursor')]
-    [string]$Agent = 'Claude'
+    [string]$Agent = 'Claude',
+    # Id of the conversation this tab is showing, when the adapter knows it.
+    # Claude's comes from the hook JSON instead.
+    [string]$ConversationId,
+    # With `resume`: the tab is waiting for the user, not working. pi sends
+    # resume on start-up and after an aborted turn, where no turn is running.
+    [switch]$Idle
 )
+
+# Claude Sonnet 5.5: headless claude -p children inherit the tab's WT_SESSION and would popup/re-capture for the interactive session.
+if ($Agent -eq 'Claude' -and $env:CLAUDE_CODE_SESSION_ATTENDED -eq '0') { exit 0 }
+
+# Cursor Agent also runs the hooks of ~/.claude/settings.json, so in a Cursor tab Claude's
+# hook fires next to Cursor's own and the tab would get a second popup titled "Claude".
+# Cursor sets CURSOR_VERSION for every hook it runs; its own hook passes -Agent Cursor.
+if ($Agent -eq 'Claude' -and $env:CURSOR_VERSION) { exit 0 }
 
 # Use WT_SESSION to isolate state between terminal tabs for either CLI.
 $sessionId = $env:WT_SESSION
@@ -24,6 +38,48 @@ if ($Agent -eq 'Claude' -and [Console]::IsInputRedirected) {
     try { $hookInput = [Console]::In.ReadToEnd() | ConvertFrom-Json } catch { }
 }
 
+# Self-heal the stored window + tab position.
+#
+# Tab index is positional, so closing or reordering a tab silently
+# invalidates it and click-to-switch then focuses the wrong tab.
+# UserPromptSubmit is the one moment this tab is provably the
+# selected tab in its window - the user just typed into it - so
+# re-capture here. Any close/reorder self-corrects on the next
+# prompt, with no fragile tab-name matching.
+#
+# save-hwnd.exe writes .hwnd-<id> / .tabindex-<id> directly when
+# given the session id, so concurrent tabs never race. It runs before
+# anything slow: a user who submits and switches windows a second later
+# would otherwise have the other window captured.
+#
+# A finished background agent also fires UserPromptSubmit, with a
+# <task-notification> prompt and nobody typing - the foreground tab
+# is then some other session's, so re-capturing would steal it.
+if ($Action -eq 'resume' -and $sessionId -ne "default") {
+    $isTaskNotification = $hookInput -and "$($hookInput.prompt)".TrimStart().StartsWith('<task-notification>')
+    $saveHwnd = "$stateDir\save-hwnd.exe"
+    if (-not $isTaskNotification -and (Test-Path $saveHwnd)) {
+        try { & $saveHwnd $sessionId 2>$null | Out-Null } catch { }
+    }
+}
+
+function Set-SessionActivity([string]$State) {
+    # Feed `notify close` / `notify restore`: whether this tab is mid-turn, and
+    # which conversation to reopen. Only tabs with a registry record are tracked.
+    # Side files rather than the record itself: see SessionRegistry.ps1.
+    try {
+        if ($sessionId -notmatch '^[A-Za-z0-9-]+$') { return }
+        $registryDir = "$stateDir\.sessions"
+        if (-not (Test-Path "$registryDir\$sessionId.json")) { return }
+        if ($State) { [IO.File]::WriteAllText("$registryDir\$sessionId.state", $State) }
+        $conversation = $ConversationId
+        if (-not $conversation -and $hookInput) { $conversation = [string]$hookInput.session_id }
+        if ($conversation -match '^[A-Za-z0-9_.-]+$') {
+            [IO.File]::WriteAllText("$registryDir\$sessionId.conv", "$Agent|$conversation")
+        }
+    } catch { }
+}
+
 function Test-AsyncAgentRunning($hookInput) {
     if (-not $hookInput -or -not $hookInput.transcript_path) { return $false }
     $path = [string]$hookInput.transcript_path
@@ -36,14 +92,17 @@ function Test-AsyncAgentRunning($hookInput) {
         $stream.Dispose()
     }
 
-    $finished = New-Object 'System.Collections.Generic.HashSet[string]'
-    foreach ($m in [regex]::Matches($text, '<task-id>([A-Za-z0-9]+)</task-id>')) {
-        $null = $finished.Add($m.Groups[1].Value)
+    # An agent that stops while its own background work runs notifies early with an
+    # interim note and notifies again later, so only its latest notification counts.
+    $isInterim = @{}
+    foreach ($m in [regex]::Matches($text, '<task-id>([A-Za-z0-9]+)</task-id>(.*?)</task-notification>')) {
+        $isInterim[$m.Groups[1].Value] = $m.Groups[2].Value -match '<note>[^<]*still running'
     }
 
     # Background Bash is ignored: a server that never exits would mute every later Stop.
     foreach ($m in [regex]::Matches($text, '"isAsync":true[^{}]*?"agentId":"([A-Za-z0-9]+)"')) {
-        if (-not $finished.Contains($m.Groups[1].Value)) { return $true }
+        $id = $m.Groups[1].Value
+        if (-not $isInterim.ContainsKey($id) -or $isInterim[$id]) { return $true }
     }
 
     return $false
@@ -142,33 +201,13 @@ try {
             # The prompt that raised the popup went away without the user
             # necessarily being in this tab (a dialog that timed out), so close
             # the popup but do not re-capture the selected tab like resume does.
+            # Only pi sends this, and only inside a turn that now carries on.
+            Set-SessionActivity 'busy'
             Stop-SessionFlash
             Stop-SessionPopups
         }
         "resume" {
-            # Self-heal the stored window + tab position.
-            #
-            # Tab index is positional, so closing or reordering a tab silently
-            # invalidates it and click-to-switch then focuses the wrong tab.
-            # UserPromptSubmit is the one moment this tab is provably the
-            # selected tab in its window - the user just typed into it - so
-            # re-capture here. Any close/reorder self-corrects on the next
-            # prompt, with no fragile tab-name matching.
-            #
-            # save-hwnd.exe writes .hwnd-<id> / .tabindex-<id> directly when
-            # given the session id, so concurrent tabs never race.
-            #
-            # A finished background agent also fires UserPromptSubmit, with a
-            # <task-notification> prompt and nobody typing - the foreground tab
-            # is then some other session's, so re-capturing would steal it.
-            $isTaskNotification = $hookInput -and "$($hookInput.prompt)".TrimStart().StartsWith('<task-notification>')
-            if ($sessionId -ne "default" -and -not $isTaskNotification) {
-                $saveHwnd = "$stateDir\save-hwnd.exe"
-                if (Test-Path $saveHwnd) {
-                    try { & $saveHwnd $sessionId 2>$null | Out-Null } catch { }
-                }
-            }
-
+            Set-SessionActivity $(if ($Idle) { 'idle' } else { 'busy' })
             Stop-SessionFlash
             Stop-SessionPopups
         }
@@ -176,7 +215,28 @@ try {
             # Stop also fires when a turn ends with agents still working in the background.
             $isAgentRunning = $false
             try { $isAgentRunning = Test-AsyncAgentRunning $hookInput } catch { }
-            if ($isAgentRunning) { exit 0 }
+            if ($isAgentRunning) {
+                Set-SessionActivity $null
+                exit 0
+            }
+            Set-SessionActivity 'idle'
+
+            # The stored window and tab position date from the last prompt. A tab
+            # reordered, dragged to another window or shifted by a closed
+            # neighbour since then is found again here, so the popup names and
+            # focuses the right tab. Only registered tabs: the lookup needs a
+            # process that runs in the tab, which the registry record names.
+            try {
+                $recordFile = "$stateDir\.sessions\$sessionId.json"
+                $locator = "$stateDir\save-hwnd.exe"
+                if ($sessionId -match '^[A-Za-z0-9-]+$' -and (Test-Path $recordFile) -and (Test-Path $locator)) {
+                    $shellPid = [int](Get-Content $recordFile -Raw | ConvertFrom-Json).shellPid
+                    if ($shellPid -gt 0) {
+                        $locate = Start-Process -FilePath $locator -ArgumentList '--locate', "${sessionId}:$shellPid" -WindowStyle Hidden -PassThru
+                        if (-not $locate.WaitForExit(4000)) { try { $locate.Kill() } catch { } }
+                    }
+                }
+            } catch { }
 
             # Read saved HWND for this session
             $hwnd = [IntPtr]::Zero
@@ -207,13 +267,24 @@ try {
                     )
                     if ($tabIdx -ge 1 -and $tabIdx -le $tabs.Count) {
                         $rawName = $tabs[$tabIdx - 1].Current.Name
+                        # The lookup above may still be on screen as the tab's
+                        # name; it saved the real title next to the position.
+                        if ($rawName -match 'ntfy-[0-9a-f]{12}') {
+                            $rawName = [string](Get-Content "$stateDir\.tabname-$sessionId" -Raw -ErrorAction SilentlyContinue)
+                        }
                         # Agents prefix the tab with a glyph - pi uses a pi
                         # character, so "pi - PotatoSandwich". Dropping the
                         # non-ASCII glyph leaves the separator behind and the
                         # popup would read "Pi - - PotatoSandwich", so strip
                         # any leading separator as well.
+                        #
+                        # Cursor ends the title with a status badge, "name - <glyph> Ready".
+                        # The popup already says the tab is waiting, so the badge goes:
+                        # a trailing separator, glyph and one word. Where the glyph
+                        # was already dropped, the two spaces it stood between mark it.
+                        $rawName = $rawName -replace '\s[\-:|](?:\s*[^\x20-\x7E]+\s*|\s{2,})\w+\s*$', ''
                         $tabName = ($rawName -replace '[^\x20-\x7E]', '') -replace '^[\s\-:|]+', ''
-                        $tabName = $tabName.Trim()
+                        $tabName = ($tabName -replace '\s{2,}', ' ').Trim()
                         if ($tabName) {
                             $labelFile = "$stateDir\.label-$sessionId"
                             $existingLabel = ""
