@@ -9,7 +9,8 @@ param(
     [Parameter(Position = 2)][string]$WindowNum,
     [Parameter(Position = 3)][string]$Model,
     [Parameter(Position = 4)][string]$Effort,
-    [Parameter(Position = 5)][string]$ContextWindow
+    [Parameter(Position = 5)][string]$ContextWindow,
+    [Parameter(Position = 6)][string]$Style
 )
 
 $cwd = (Get-Location).Path.TrimEnd('\')
@@ -34,6 +35,15 @@ switch ($ContextWindow) {
 Write-Host "[DevLayout] $Label" -ForegroundColor Cyan
 Write-Host "[DevLayout] repo: $cwd" -ForegroundColor DarkGray
 
+# Codex has no output styles, so the rules go in as developer instructions. They
+# apply at launch only: Codex cannot swap them inside a running conversation.
+. (Join-Path $PSScriptRoot "..\ps1-scripts\ResponseStyle.ps1")
+$resolvedStyle = Resolve-ResponseStyle -Name $Style
+if ($resolvedStyle) {
+    $extraArgs += @("-c", (ConvertTo-CodexInstructionArg -Text $resolvedStyle.Text))
+    Write-Host "[DevLayout] style: $($resolvedStyle.Label)" -ForegroundColor DarkGray
+}
+
 # Optional agentic-cli-notify registry, so `notify close` / `notify restore`
 # cover this tab. `notify restore` passes the exact conversation to reopen in
 # AGENTIC_RESUME_ID; cleared here so nothing Codex starts inherits it.
@@ -44,7 +54,7 @@ $sessionRegistry = Join-Path $env:USERPROFILE ".claude\hooks\agentic-cli-notify\
 if (Test-Path $sessionRegistry) {
     . $sessionRegistry
     $registeredSession = Register-AgentSession -Agent Codex -Command codex -Title ($Label -replace ' / [^/]*$', '') `
-        -Launcher $PSCommandPath -LauncherArguments @($TabIndex, $Label, $WindowNum, $Model, $Effort, $ContextWindow)
+        -Launcher $PSCommandPath -LauncherArguments @($TabIndex, $Label, $WindowNum, $Model, $Effort, $ContextWindow, $Style)
 }
 
 try {

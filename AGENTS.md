@@ -9,10 +9,11 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 | Area | Entry point | Notes |
 |------|-------------|-------|
 | Layout composer UI | `LayoutUI.bat` -> `layout_ui.py` | Python 3 + customtkinter. Edits/launches JSON presets in `custom-layouts/`. Work directories in `repos.json`. Theme tokens in `ui_theme.py`. Last opened preset and recently picked models are stored in `.layout-ui-state.json` beside the script/exe and reopened on the next start. |
-| Standalone exe | `Build-LayoutUI.ps1` + `LayoutUI.spec` | PyInstaller onefile to repo root. Exe reads `custom-layouts/`, `repos.json`, `ps1-scripts/` from its own folder; none bundled. |
+| Standalone exe | `Build-LayoutUI.ps1` + `LayoutUI.spec` | PyInstaller onefile to repo root. Exe reads `custom-layouts/`, `repos.json`, `ps1-scripts/`, `styles/` from its own folder; none bundled. |
 | Layout launcher | `ps1-scripts/Invoke-CustomLayout.ps1 -ConfigPath <json> [-DryRun]` | One `Invoke-LayoutWindow` call per window. Maps `agent` key to launcher. |
 | Layout engine | `ps1-scripts/LayoutEngine.ps1` | Dot-sourced. Opens one WT window, one tab per repo, maximized or snapped left/right on target monitor. Win32 plumbing lives here. |
-| Per-agent launchers | `launchers/launch-{claude,codex,pi,agent}.ps1` | Positional args: TabIndex, Label, WindowNum, Model, Effort, ContextWindow. Run inside the tab's working dir. |
+| Per-agent launchers | `launchers/launch-{claude,codex,pi,agent}.ps1` | Positional args: TabIndex, Label, WindowNum, Model, Effort, ContextWindow, Style. Run inside the tab's working dir. |
+| Response styles | `styles/` + `ps1-scripts/ResponseStyle.ps1` | One rules file per style (`ste.md`, `caveman.md`), listed in `styles/styles.json`, shared by Claude, Codex and pi. `ps1-scripts/Install-ResponseStyles.ps1` installs the Claude output styles and the `/style` skill. See "Response styles" below. |
 | Session resume | `ps1-scripts/SessionSlot.ps1`, `hooks/devlayout-session-save.ps1`, `register-session-hook.js` | Claude only. Install via `ps1-scripts/Setup-DevLayout.ps1`. Dry-run via `ps1-scripts/Test-Resume.ps1`. |
 | Notifications | `agentic-cli-notify/` | Taskbar flash + WPF popup per WT tab. Own docs: `agentic-cli-notify/README.md`, `agentic-cli-notify/CLAUDE.md`. |
 | `notify` command | `agentic-cli-notify/ps1-scripts/notify-cli.ps1` + `SessionRegistry.ps1` | On PATH after `install.ps1`. `notify <agent> [flags]` sets up notifications for the current tab and registers it; `notify list / close / restore` save, close and reopen every registered tab on its exact conversation; `notify reopen` brings back tabs closed with X. Tab positions are re-read from Windows Terminal (`save-hwnd.exe --locate`), so reorder and moves between windows are followed. Covers `notify`, context-menu and layout tabs. |
@@ -29,7 +30,8 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
       "name": "label", "windowNum": 102, "targetMonitor": 0, "position": "maximize",
       "tabs": [
         { "title": "T1", "workingDir": "C:\\Repos\\x", "agent": "pi",
-          "model": "openrouter/tencent/hy4-preview", "effort": "medium", "contextWindow": "0.25m" }
+          "model": "openrouter/tencent/hy4-preview", "effort": "medium", "contextWindow": "0.25m",
+          "style": "ste" }
       ]
     }
   ]
@@ -39,6 +41,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 - `position`: `maximize` (default) | `left` | `right`. Left/right snap the window to that half of `targetMonitor` via Win+Arrow. Not editable in the UI yet; the UI preserves it on save.
 - `agent`: `claude` | `codex` | `pi` | `cursor` (alias `agent`). Case-insensitive.
 - `model`, `effort`, `contextWindow` optional; empty = CLI default. Cursor ignores all three.
+- `style` optional: a key from `styles/styles.json` (`ste` | `caveman`) or its label; empty or absent = the agent's own default. Unknown values warn and launch without a style. Cursor ignores it.
 - `effort`: `low|medium|high|xhigh|max`. Claude `--effort`, Codex `model_reasoning_effort`, pi `--thinking`.
 - `contextWindow`: Claude only `default[1m]`; Codex `default|0.25m|0.5m|MAX`; pi `default|0.25m|0.5m|1m|MAX`. Pi has no flag, so `launch-pi.ps1` writes `modelOverrides.contextWindow` into a per-tab config directory (see below).
 - Pi `MAX` means the selected model's catalog window from `~/.pi/agent/models-store.json`. For the OpenAI GPT-5.6 models that catalog value is pi's short-context-pricing default (272000), not the provider ceiling, so `MAX` is a no-op there and `1m` is what opts them into the long-context window. Verify any change with `pi --list-models <id>`, which prints the effective window.
@@ -56,7 +59,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 - Never put `;` inside a tab command: wt.exe splits on it as a tab separator.
 - `register-session-hook.js` edits only its own key in `~/.claude/settings.json`. Do not replace with a PowerShell JSON round-trip (needs PS 6+, reformats file).
 - Notification state keyed by `WT_SESSION`. Hooks outside Windows Terminal are ignored.
-- **Launchers register their tab** through the installed `SessionRegistry.ps1` (skipped when notify is not installed) and unregister in `finally`. Restore reruns the launcher with its original six arguments, so `windowNum` and tab-order rules above still decide the Claude conversation. Codex, pi and Cursor launchers take an exact conversation from `AGENTIC_RESUME_ID` and fall back to their per-working-dir resume when it is rejected; they clear the variable before starting the agent.
+- **Launchers register their tab** through the installed `SessionRegistry.ps1` (skipped when notify is not installed) and unregister in `finally`. Restore reruns the launcher with its original seven arguments, so `windowNum` and tab-order rules above still decide the Claude conversation. Codex, pi and Cursor launchers take an exact conversation from `AGENTIC_RESUME_ID` and fall back to their per-working-dir resume when it is rejected; they clear the variable before starting the agent.
 
 ## Conventions
 
@@ -113,9 +116,22 @@ $env:PI_CODING_AGENT_DIR = "$env:USERPROFILE\.pi\devlayout\w102-t1"; pi --list-m
 - Regression: `powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-PiTheme.ps1`.
   Manual acceptance: select the theme in ordinary Pi and a toolkit overlay tab.
 
+## Response styles
+
+- `styles/<key>.md` holds the rules as plain Markdown with no agent-specific frontmatter. `styles/styles.json` maps each key to its label, file and description. Add a style by adding both; the composer's Style column, the launchers, the installer and the pi `/style` command all read the catalog.
+- **Claude:** `launch-claude.ps1` passes `--settings <state dir>\.devlayout-style-<key>.json` holding only `outputStyle`, which overrides the user's global value for that tab. This needs the output style installed as `~/.claude/output-styles/agentic-<key>.md` (`Install-ResponseStyles.ps1`); without it the launcher warns and falls back to `--append-system-prompt-file`. The settings go in a file because Windows PowerShell 5.1 strips double quotes from inline JSON arguments. The launcher also sets `CAVEMAN_DEFAULT_MODE` (`full` for `caveman`, else `off`) so the third-party caveman plugin's SessionStart hook does not inject the other style, exports `DEVLAYOUT_STYLE`, and deletes the tab's `~/.claude/style-sessions/<session id>` flag.
+- **Claude records the system prompt per conversation** (`--system-prompt-snapshot`, on by default). On a resumed conversation a changed style reaches the model as a later instruction block, not as a new system prompt. Do not pass `--system-prompt-snapshot off` to force it: that re-renders the prompt on every request.
+- **Claude `/style` skill** (`styles/claude-skill/`, installed to `~/.claude/skills/style/`): `Switch-ResponseStyle.ps1` edits only the `outputStyle` value in `settings.json` by text replacement (same reason as `register-session-hook.js`), touches the caveman plugin config only when that plugin is present, writes `~/.claude/.style-mode` and `~/.claude/style-sessions/<session id>`, and prints the rules for the running session to adopt. Inside a running conversation this is an instruction, not a system prompt change.
+- **Codex:** `launch-codex.ps1` passes `-c developer_instructions=<TOML multi-line literal>` built by `ConvertTo-CodexInstructionArg`, which turns double quotes into single ones and shortens runs of three or more quotes. Launch-time only; relaunch the tab to change it.
+- **pi:** `launch-pi.ps1` always passes `--extension styles\pi-extension\agentic-cli-style.ts` plus `AGENTIC_STYLES_DIR` and `AGENTIC_STYLE`. The extension writes the rules into `systemPromptOptions.sections.response_style` in `before_agent_start`, registers `/style [key|off]`, and shows the label in the footer. It edits `sections` rather than returning `systemPrompt` so pi patches one section and keeps the cached prefix. Never install this extension into `~/.pi/agent/extensions` as well: it would load twice.
+- `Install-ResponseStyles.ps1 [-ClaudeDir <path>] [-WhatIf] [-Force]` never edits settings, skips identical files, requires `-Force` for a differing file, and warns when another output style file already uses the same `name`.
+- Statuslines: Claude Code passes the session's style as `output_style.name` (`ASD-STE100` / `Caveman`) in the statusline JSON; a `/style` switch inside a session is visible only through `~/.claude/style-sessions/<session id>`.
+- Tabs opened through `notify` or the Explorer menu do not pass a style; Claude uses its global `outputStyle` there, Codex and pi run unstyled.
+- Regression: `powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ResponseStyles.ps1`.
+
 ## Adding a new agent
 
-1. Add `launchers/launch-<agent>.ps1` with the six positional params; resume per working dir.
+1. Add `launchers/launch-<agent>.ps1` with the seven positional params; resume per working dir.
 2. Add key to `$AgentMap` in `ps1-scripts/Invoke-CustomLayout.ps1`.
 3. Add to `AGENTS`, model/effort/context tables in `layout_ui.py`.
 4. Add notification adapter in `agentic-cli-notify/` (see its `CLAUDE.md`); `notify.ps1 -Agent` value is only a popup title.

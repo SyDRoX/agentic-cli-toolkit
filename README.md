@@ -75,6 +75,37 @@ Run the isolated installer regression test (no installed Pi required):
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-PiTheme.ps1
 ```
 
+## Response styles
+
+A tab can start its agent in a bundled response style. Add `"style"` to the tab in
+a preset, or pick it in the composer's **Style** column:
+
+| Key | Style |
+|-----|-------|
+| `ste` | ASD-STE100: controlled plain English, short full sentences, no filler |
+| `caveman` | Caveman: compressed fragments, full technical substance |
+
+The rules live once in `styles/` and reach each agent its own way:
+
+| Agent | At launch | Switch inside a session |
+|-------|-----------|-------------------------|
+| Claude Code | Output style selected for that tab | `/style [ste\|caveman]` |
+| pi | System prompt section from a bundled extension | `/style [ste\|caveman\|off]` |
+| Codex | Developer instructions | Relaunch the tab |
+
+Cursor Agent tabs ignore the field. Claude needs a one-time install of the output
+styles and the `/style` skill; it never edits your settings:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\Install-ResponseStyles.ps1          # -WhatIf to preview, -Force to replace changed files
+```
+
+Claude Code keeps the system prompt of a running conversation, so a style changed
+on a resumed tab, or with `/style`, takes effect as an instruction and becomes part
+of the system prompt in the next new conversation. The caveman rules are written for
+this toolkit; the idea comes from the
+[caveman plugin](https://github.com/JuliusBrussee/caveman) by Julius Brussee.
+
 ## Session resume
 
 The toolkit gives each window/tab position a deterministic session slot and

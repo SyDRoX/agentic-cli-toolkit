@@ -12,7 +12,9 @@ param(
     # Model/Effort/ContextWindow: cursor agent has no equivalent CLI flags, unused.
     [Parameter(Position = 3)][string]$Model,
     [Parameter(Position = 4)][string]$Effort,
-    [Parameter(Position = 5)][string]$ContextWindow
+    [Parameter(Position = 5)][string]$ContextWindow,
+    # Accepted so the positional call lines up; Cursor Agent has no prompt hook to carry a style.
+    [Parameter(Position = 6)][string]$Style
 )
 
 $cwd = (Get-Location).Path.TrimEnd('\')
@@ -30,7 +32,7 @@ $sessionRegistry = Join-Path $env:USERPROFILE ".claude\hooks\agentic-cli-notify\
 if (Test-Path $sessionRegistry) {
     . $sessionRegistry
     $registeredSession = Register-AgentSession -Agent Cursor -Command agent -Title ($Label -replace ' / [^/]*$', '') `
-        -Launcher $PSCommandPath -LauncherArguments @($TabIndex, $Label, $WindowNum, $Model, $Effort, $ContextWindow)
+        -Launcher $PSCommandPath -LauncherArguments @($TabIndex, $Label, $WindowNum, $Model, $Effort, $ContextWindow, $Style)
 }
 
 try {

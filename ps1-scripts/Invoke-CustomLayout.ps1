@@ -101,6 +101,7 @@ foreach ($win in $config.windows) {
             Model          = if ($t.model) { [string]$t.model } else { "" }
             Effort         = if ($t.effort) { [string]$t.effort } else { "" }
             ContextWindow  = if ($t.contextWindow) { [string]$t.contextWindow } else { "" }
+            Style          = if ($t.style) { [string]$t.style } else { "" }
         }
     }
 
