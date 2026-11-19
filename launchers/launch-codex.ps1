@@ -42,6 +42,9 @@ $resolvedStyle = Resolve-ResponseStyle -Name $Style
 if ($resolvedStyle) {
     $extraArgs += @("-c", (ConvertTo-CodexInstructionArg -Text $resolvedStyle.Text))
     Write-Host "[DevLayout] style: $($resolvedStyle.Label)" -ForegroundColor DarkGray
+} else {
+    # Overrides the default style that Install-ResponseStyles.ps1 puts in config.toml.
+    $extraArgs += @("-c", "developer_instructions=''")
 }
 
 # Optional agentic-cli-notify registry, so `notify close` / `notify restore`

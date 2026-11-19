@@ -8,6 +8,8 @@ $installer = Join-Path $toolkitDir "ps1-scripts\Install-ResponseStyles.ps1"
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("response-style-test-" + [guid]::NewGuid())
 $claudeDir = Join-Path $tempRoot "claude [isolated]"
+$codexDir = Join-Path $tempRoot "codex"
+$piDir = Join-Path $tempRoot "pi agent"
 $cavemanDir = Join-Path $tempRoot "caveman-config"
 $switch = Join-Path $claudeDir "skills\style\Switch-ResponseStyle.ps1"
 $settings = Join-Path $claudeDir "settings.json"
@@ -30,7 +32,10 @@ try {
     # --- catalog and resolution
     $catalog = Get-ResponseStyleCatalog
     Assert-True ($catalog.Contains("ste") -and $catalog.Contains("caveman")) "Catalog must hold ste and caveman"
-    Assert-True ($null -eq (Resolve-ResponseStyle -Name "")) "Empty style must resolve to null"
+    Assert-True ((Get-DefaultResponseStyleKey) -eq "ste") "ste must be the catalog default"
+    Assert-True ((Resolve-ResponseStyle -Name "").Key -eq "ste") "Empty style must resolve to the default"
+    Assert-True ($null -eq (Resolve-ResponseStyle -Name "OFF")) "off must resolve to null"
+    Assert-True ($null -eq (Resolve-ResponseStyle -Name "none")) "none must resolve to null"
     Assert-True ($null -eq (Resolve-ResponseStyle -Name "nope" 3>$null)) "Unknown style must resolve to null"
     $ste = Resolve-ResponseStyle -Name "STE"
     Assert-True ($ste.Label -eq "ASD-STE100" -and $ste.Text.Length -gt 200) "ste must resolve by key, any case"
@@ -56,11 +61,27 @@ try {
     Assert-True ($segments[0] -match "'' '' '' 'ste'") "Styled tab must end with its style argument: $($segments[0])"
     Assert-True ($segments[1] -match "'' '' '' ''") "Unstyled tab must pass an empty style argument: $($segments[1])"
 
-    # --- installer
-    & $installer -ClaudeDir $claudeDir -WhatIf
-    Assert-True (-not (Test-Path -LiteralPath $claudeDir)) "WhatIf created directories"
+    # --- Codex config.toml block
+    $toml = "model = `"x`"`r`n`r`n[features]`r`na = true`r`n"
+    $withBlock = Set-CodexStyleBlock -ConfigText $toml -Style $ste
+    Assert-True ($withBlock.StartsWith("# >>> agentic-cli-toolkit")) "Block must come before any table"
+    Assert-True ($withBlock.EndsWith("[features]`na = true`n")) "Block insert lost the rest of the file"
+    Assert-True ((Set-CodexStyleBlock -ConfigText $withBlock -Style $ste) -ceq $withBlock) "Block insert is not idempotent"
+    Assert-True ((Set-CodexStyleBlock -ConfigText $withBlock -Style $null) -ceq $toml.Replace("`r`n", "`n")) "Block removal must restore the file"
+    Assert-Throws { Set-CodexStyleBlock -ConfigText "developer_instructions = 'x'" -Style $ste } "*outside the managed block*"
 
-    & $installer -ClaudeDir $claudeDir
+    # --- installer
+    New-Item -ItemType Directory -Path $codexDir, $piDir -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $codexDir "config.toml"), $toml)
+    function Invoke-Installer { & $installer -ClaudeDir $claudeDir -CodexDir $codexDir -PiDir $piDir @args }
+    Invoke-Installer -WhatIf
+    Assert-True (-not (Test-Path -LiteralPath $claudeDir)) "WhatIf created directories"
+    Assert-True ([IO.File]::ReadAllText((Join-Path $codexDir "config.toml")) -ceq $toml) "WhatIf changed config.toml"
+
+    Invoke-Installer
+    Assert-True ([IO.File]::ReadAllText((Join-Path $codexDir "config.toml")) -ceq $withBlock) "Installer must write the Codex default block"
+    $shim = [IO.File]::ReadAllText((Get-PiStyleShimPath -PiDir $piDir))
+    Assert-True ($shim.Contains("/styles/pi-extension/agentic-cli-style.ts`"") -and $shim.Contains("AGENTIC_STYLES_DIR ??=")) "pi shim content wrong"
     $steFile = Join-Path $claudeDir "output-styles\agentic-ste.md"
     $steText = [IO.File]::ReadAllText($steFile)
     Assert-True ($steText.StartsWith("---`nname: ASD-STE100`n")) "Output style frontmatter missing"
@@ -69,13 +90,13 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $settings)) "Installer must not create settings.json"
 
     $timestamp = (Get-Item -LiteralPath $steFile).LastWriteTimeUtc
-    & $installer -ClaudeDir $claudeDir
+    Invoke-Installer
     Assert-True ((Get-Item -LiteralPath $steFile).LastWriteTimeUtc -eq $timestamp) "Repeat install rewrote a file"
 
     [IO.File]::WriteAllText($steFile, "user edit")
-    Assert-Throws { & $installer -ClaudeDir $claudeDir } "File differs:*"
+    Assert-Throws { Invoke-Installer } "File differs:*"
     Assert-True ([IO.File]::ReadAllText($steFile) -eq "user edit") "Failed install changed the differing file"
-    & $installer -ClaudeDir $claudeDir -Force
+    Invoke-Installer -Force
     Assert-True ([IO.File]::ReadAllText($steFile) -eq $steText) "Force did not restore the output style"
 
     # --- /style switch

@@ -1,7 +1,9 @@
 // Response styles for pi.
 //
-// launch-pi.ps1 loads this file with --extension and passes the tab's style in
-// AGENTIC_STYLE and the styles directory in AGENTIC_STYLES_DIR. The rules go into
+// launch-pi.ps1 passes the tab's style in AGENTIC_STYLE and the styles directory in
+// AGENTIC_STYLES_DIR. An unset or empty AGENTIC_STYLE means the catalog default
+// ("default": true in styles.json); "off" means no style. Install-ResponseStyles.ps1
+// installs a global shim so a bare `pi` gets the default too. The rules go into
 // the system prompt as their own section, so pi patches only that section when the
 // style changes and the cached prompt prefix survives.
 //
@@ -17,12 +19,13 @@ import { join } from "node:path";
 
 const SECTION = "response_style";
 const STATUS_KEY = "style";
-const OFF_WORDS = ["off", "none", "default"];
+const OFF_WORDS = ["off", "none"];
 
 interface Style {
   key: string;
   label: string;
   text: string;
+  isDefault: boolean;
 }
 
 function loadCatalog(): Style[] {
@@ -33,7 +36,7 @@ function loadCatalog(): Style[] {
     if (!existsSync(catalogPath)) return [];
     // PowerShell 5.1 tools may leave a BOM, which JSON.parse rejects.
     const raw = readFileSync(catalogPath, "utf8").replace(/^﻿/, "");
-    const entries = JSON.parse(raw) as Record<string, { label?: string; file?: string }>;
+    const entries = JSON.parse(raw) as Record<string, { label?: string; file?: string; default?: boolean }>;
     const styles: Style[] = [];
     for (const [key, entry] of Object.entries(entries)) {
       const rulesPath = join(dir, String(entry.file ?? ""));
@@ -42,6 +45,7 @@ function loadCatalog(): Style[] {
         key: key.toLowerCase(),
         label: String(entry.label ?? key),
         text: readFileSync(rulesPath, "utf8").replace(/^﻿/, "").trim(),
+        isDefault: entry.default === true,
       });
     }
     return styles;
@@ -58,7 +62,12 @@ function findStyle(styles: Style[], name: string): Style | undefined {
 
 export default function (pi: any) {
   const styles = loadCatalog();
-  let active: Style | undefined = findStyle(styles, process.env.AGENTIC_STYLE ?? "");
+  const requested = (process.env.AGENTIC_STYLE ?? "").trim().toLowerCase();
+  let active: Style | undefined = !requested
+    ? styles.find((s) => s.isDefault)
+    : OFF_WORDS.includes(requested)
+      ? undefined
+      : findStyle(styles, requested);
 
   const showStatus = (ctx: any) => {
     try {

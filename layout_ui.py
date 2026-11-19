@@ -128,12 +128,12 @@ CONTEXT_WINDOWS = CLAUDE_CONTEXT_WINDOWS
 
 
 def load_response_styles() -> list[str]:
-    """Style keys from styles/styles.json beside the script/exe; blank means no style."""
+    """Style keys from styles/styles.json beside the script/exe; blank = catalog default, "off" = no style."""
     try:
         catalog = json.loads((ROOT / "styles" / "styles.json").read_text(encoding="utf-8-sig"))
-        return [""] + [str(key).lower() for key in catalog]
+        return [""] + [str(key).lower() for key in catalog] + ["off"]
     except (OSError, ValueError, AttributeError):
-        return [""]
+        return ["", "off"]
 
 
 RESPONSE_STYLES = load_response_styles()
