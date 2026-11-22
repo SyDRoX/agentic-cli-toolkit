@@ -1,0 +1,7 @@
+{
+  "ticketPattern": "PROJ-\\d+",
+  "repoAliases": {
+    "app": "example-org/example-app",
+    "backend": "example-org/example-backend"
+  }
+}
