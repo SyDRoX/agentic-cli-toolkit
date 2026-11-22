@@ -261,16 +261,20 @@ if ($window -and $info.ContextWindow -and [int]$info.ContextWindow -eq [int]$win
 $piArgs = @("--continue", "--model", $modelPattern)
 if ($Effort) { $piArgs += @("--thinking", $Effort) }
 
-# The style extension is loaded by path on every tab, so /style works even on a tab
-# launched without a style, and nothing is written into the pi config directory.
+# The style extension is loaded on every tab, so /style works even on a tab launched
+# with style "off". The global shim from Install-ResponseStyles.ps1 already loads it;
+# passing --extension as well would register /style twice.
 . (Join-Path $PSScriptRoot "..\ps1-scripts\ResponseStyle.ps1")
 $resolvedStyle = Resolve-ResponseStyle -Name $Style
 $stylesDir = Join-Path (Split-Path -Parent $PSScriptRoot) "styles"
 $styleExtension = Join-Path $stylesDir "pi-extension\agentic-cli-style.ts"
 if (Test-Path -LiteralPath $styleExtension) {
-    $piArgs += @("--extension", $styleExtension)
+    if (-not (Test-Path -LiteralPath (Get-PiStyleShimPath -PiDir $agentDir))) {
+        $piArgs += @("--extension", $styleExtension)
+    }
     $env:AGENTIC_STYLES_DIR = $stylesDir
-    $env:AGENTIC_STYLE = if ($resolvedStyle) { $resolvedStyle.Key } else { "" }
+    # "off", not empty: the extension reads an empty value as the catalog default.
+    $env:AGENTIC_STYLE = if ($resolvedStyle) { $resolvedStyle.Key } else { "off" }
 }
 
 $ctxNote = if ($window) { "context $window" } else { "context default" }

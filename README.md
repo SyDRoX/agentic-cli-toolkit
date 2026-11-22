@@ -78,7 +78,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-PiTheme.ps1
 ## Response styles
 
 A tab can start its agent in a bundled response style. Add `"style"` to the tab in
-a preset, or pick it in the composer's **Style** column:
+a preset, or pick it in the composer's **Style** column. Empty means the default
+(`ste`); `off` means no style:
 
 | Key | Style |
 |-----|-------|
@@ -93,8 +94,10 @@ The rules live once in `styles/` and reach each agent its own way:
 | pi | System prompt section from a bundled extension | `/style [ste\|caveman\|off]` |
 | Codex | Developer instructions | Relaunch the tab |
 
-Cursor Agent tabs ignore the field. Claude needs a one-time install of the output
-styles and the `/style` skill; it never edits your settings:
+Cursor Agent tabs ignore the field. A one-time install adds the Claude output styles
+and the `/style` skill, puts the default style in a managed block of
+`~/.codex/config.toml`, and adds a pi extension shim to `~/.pi/agent/extensions`, so
+agents started outside a layout get it too. It never edits Claude settings:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\Install-ResponseStyles.ps1          # -WhatIf to preview, -Force to replace changed files
@@ -105,6 +108,24 @@ on a resumed tab, or with `/style`, takes effect as an instruction and becomes p
 of the system prompt in the next new conversation. The caveman rules are written for
 this toolkit; the idea comes from the
 [caveman plugin](https://github.com/JuliusBrussee/caveman) by Julius Brussee.
+
+## Working rules
+
+`rules/agent-rules.md` holds a short set of working rules (comments, tests,
+reviews, Git, long runs, reports) that apply in every project. One installer
+gives the same rules to Claude Code, Codex and pi:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\Install-AgentRules.ps1 -WhatIf
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\Install-AgentRules.ps1
+```
+
+It writes the rules as a marked block into `~/.claude/CLAUDE.md`,
+`~/.codex/AGENTS.md` and `~/.pi/agent/AGENTS.md`, creates a file that does not
+exist, and skips an agent whose directory is missing. Text outside the block is
+never changed. Edit `rules/agent-rules.md` and rerun to update the block;
+`-Remove` takes it out. The rules are the author's habits: change the file to
+your own before you install.
 
 ## Session resume
 
@@ -177,6 +198,7 @@ opened.
 | `agentic-cli-notify/` | Bundled multi-agent notification component |
 | `ps1-scripts/LLM_ContextMenu_Toggle.ps1` | Explorer integration |
 | `ps1-scripts/LLM_ContextMenu.config.yaml` | Explorer menu CLI options and defaults |
+| `rules/` + `ps1-scripts/Install-AgentRules.ps1` | Shared working rules for Claude, Codex and pi |
 | `custom-layouts/` | Example layout presets |
 | `repos.json` | Editable repository catalog |
 

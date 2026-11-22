@@ -113,6 +113,12 @@ if ($resolvedStyle) {
     }
 } else {
     Remove-Item Env:DEVLAYOUT_STYLE -ErrorAction SilentlyContinue
+    if (Test-ResponseStyleOff -Name $style) {
+        # Overrides a global outputStyle, which may itself be a bundled style.
+        $styleSettings = Join-Path $StateDir ".devlayout-style-off.json"
+        [System.IO.File]::WriteAllText($styleSettings, '{"outputStyle":"default"}', (New-Object System.Text.UTF8Encoding($false)))
+        $extraArgs += @("--settings", $styleSettings)
+    }
 }
 
 # Let the SessionStart hook know which slot to persist into. Set before Claude
