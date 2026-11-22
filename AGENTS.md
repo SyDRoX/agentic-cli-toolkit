@@ -14,6 +14,7 @@ notifications when an agent needs input. Upstream: SyDRoX/dev-layout (MIT).
 | Layout engine | `ps1-scripts/LayoutEngine.ps1` | Dot-sourced. Opens one WT window, one tab per repo, maximized or snapped left/right on target monitor. Win32 plumbing lives here. |
 | Per-agent launchers | `launchers/launch-{claude,codex,pi,agent}.ps1` | Positional args: TabIndex, Label, WindowNum, Model, Effort, ContextWindow, Style. Run inside the tab's working dir. |
 | Response styles | `styles/` + `ps1-scripts/ResponseStyle.ps1` | One rules file per style (`ste.md`, `caveman.md`), listed in `styles/styles.json`, shared by Claude, Codex and pi. `ps1-scripts/Install-ResponseStyles.ps1` installs the Claude output styles and the `/style` skill. See "Response styles" below. |
+| Skills | `skills/` + `ps1-scripts/Install-Skills.ps1` | Claude only. One folder per skill, copied to `~/.claude/skills`. Ships `/memory-lint`. See "Skills" below. |
 | Session resume | `ps1-scripts/SessionSlot.ps1`, `hooks/devlayout-session-save.ps1`, `register-session-hook.js` | Claude only. Install via `ps1-scripts/Setup-DevLayout.ps1`. Dry-run via `ps1-scripts/Test-Resume.ps1`. |
 | Notifications | `agentic-cli-notify/` | Taskbar flash + WPF popup per WT tab. Own docs: `agentic-cli-notify/README.md`, `agentic-cli-notify/CLAUDE.md`. |
 | `notify` command | `agentic-cli-notify/ps1-scripts/notify-cli.ps1` + `SessionRegistry.ps1` | On PATH after `install.ps1`. `notify <agent> [flags]` sets up notifications for the current tab and registers it; `notify list / close / restore` save, close and reopen every registered tab on its exact conversation; `notify reopen` brings back tabs closed with X. Tab positions are re-read from Windows Terminal (`save-hwnd.exe --locate`), so reorder and moves between windows are followed. Covers `notify`, context-menu and layout tabs. |
@@ -194,6 +195,18 @@ $env:PI_CODING_AGENT_DIR = "$env:USERPROFILE\.pi\devlayout\w102-t1"; pi --list-m
 - pi overlays hard-link `AGENTS.md` from the global agent directory, so layout tabs get the rules with no launcher change. An `AGENTS.override.md`
   in the pi agent directory replaces `AGENTS.md`; the installer warns.
 - Regression: `powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-AgentRules.ps1`.
+
+## Skills
+
+- `skills/<name>/` is one Claude Code skill: a `SKILL.md` plus the files it runs. Flat folders only; the installer does not copy subfolders. No
+  personal or employer details: per-user data such as repository aliases stays in the user's own config, never in the skill.
+- `ps1-scripts/Install-Skills.ps1 [-ClaudeDir <path>] [-Force] [-WhatIf] [-Remove]` copies every skill folder to `<ClaudeDir>/skills/<name>` with LF
+  line endings. A differing destination file stops the run before any write unless `-Force` is given. `-Remove` deletes only shipped files, and a
+  skill folder only when that leaves it empty. The `/style` skill is not here; `Install-ResponseStyles.ps1` builds it.
+- `skills/memory-lint/memory_lint.py` only reads and uses the standard library. It resolves a `<alias> ... #N` pull request claim to the nearest
+  alias before the number, and takes the claim text from the previous PR reference or sentence break up to the next PR reference, so a status word
+  for one PR does not count for its neighbour.
+- Regression: `powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-Skills.ps1` and `python -m unittest discover -s tests`.
 
 ## Adding a new agent
 

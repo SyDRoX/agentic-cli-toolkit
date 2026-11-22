@@ -127,6 +127,29 @@ never changed. Edit `rules/agent-rules.md` and rerun to update the block;
 `-Remove` takes it out. The rules are the author's habits: change the file to
 your own before you install.
 
+## Skills
+
+`skills/` holds Claude Code skills. One installer copies them into
+`~/.claude/skills`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\Install-Skills.ps1 -WhatIf
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ps1-scripts\Install-Skills.ps1
+```
+
+A file you changed is not replaced without `-Force`. `-Remove` deletes only the
+files the toolkit ships.
+
+| Skill | What it does |
+|---|---|
+| `/memory-lint` | Checks the file-based memory folder (an index plus one Markdown file per fact) for files missing from the index, dead links, missing frontmatter, old project notes and pull request claims that GitHub contradicts. It reports first and changes nothing before you approve. |
+
+`/memory-lint` runs `memory_lint.py` (Python 3.8 or newer, standard library
+only; `gh` for the optional live check). To check pull request and ticket
+claims, put a `.lint.json` in the memory folder;
+`skills/memory-lint/lint.example.json` shows the shape. The memory folder is a
+Claude Code feature, so this skill is for Claude only.
+
 ## Session resume
 
 The toolkit gives each window/tab position a deterministic session slot and
@@ -199,6 +222,7 @@ opened.
 | `ps1-scripts/LLM_ContextMenu_Toggle.ps1` | Explorer integration |
 | `ps1-scripts/LLM_ContextMenu.config.yaml` | Explorer menu CLI options and defaults |
 | `rules/` + `ps1-scripts/Install-AgentRules.ps1` | Shared working rules for Claude, Codex and pi |
+| `skills/` + `ps1-scripts/Install-Skills.ps1` | Claude Code skills (`/memory-lint`) |
 | `custom-layouts/` | Example layout presets |
 | `repos.json` | Editable repository catalog |
 
